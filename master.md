@@ -60,7 +60,7 @@
 | Feature               | Behavior                                          |
 |-----------------------|---------------------------------------------------|
 | Onboarding            | Linear wizard                                     |
-| Webhook setup         | "Connect to Discord" OAuth2 or manual URL paste    |
+| Webhook setup         | "Connect to Discord" bot OAuth (auto-creates private channel + webhook) or manual URL paste |
 | Min setup             | 1 webhook + 1 subreddit + 1 keyword               |
 | Subreddit suggestions | Keyword-based recommendations                     |
 | Partial config        | Allowed with status indicator                     |
@@ -145,7 +145,7 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 ```
 
 - CRUD for keywords, subreddits, webhooks
-- Discord OAuth2 webhook setup (webhook.incoming scope)
+- Discord bot integration (auto-creates private channel + webhook)
 - Match history retrieval
 - Client configuration
 - Basic analytics
@@ -221,7 +221,7 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 
 ### 7. Next.js Dashboard
 
-- Onboarding wizard: Webhook (Discord OAuth2 or manual paste) → Subreddits → Keywords → Done
+- Onboarding wizard: Webhook (Discord bot popup or manual paste) → Subreddits → Keywords → Done
 - Keyword manager: Add phrases with enter-to-add UI, exclusions, proximity config
 - Subreddit manager: Add subs, see suggestions based on keywords, status indicators
 - Match feed: Recent matches with filtering
@@ -343,7 +343,7 @@ Shared Reddit Poller
 
 ## Build Status
 
-**All 3 phases + Discord OAuth2 complete. 241 tests passing, 0 failures.**
+**All 3 phases + Discord bot integration complete. 243 tests passing, 0 failures.**
 
 ### Phase 1 — Foundation (67 tests)
 
@@ -374,13 +374,20 @@ Shared Reddit Poller
 | Background worker | `backend/app/worker/` | 14 |
 | Next.js frontend | `frontend/src/` | — |
 
-### Discord OAuth2 Integration (9 tests)
+### Discord Bot Integration (11 tests)
 
 | Component | File | Tests |
 |-----------|------|-------|
-| Discord OAuth2 endpoints | `backend/app/api/discord.py` | 9 |
+| Discord bot endpoints | `backend/app/api/discord.py` | 11 |
 | Discord callback page | `frontend/src/app/discord/callback/page.tsx` | — |
 | Onboarding "Connect to Discord" | `frontend/src/app/onboarding/page.tsx` | — |
+
+**Discord bot flow:**
+1. User clicks "Connect to Discord" → opens popup with Discord OAuth2 (`scope=bot`, `permissions=536870928`)
+2. User picks a server → bot joins with MANAGE_CHANNELS + MANAGE_WEBHOOKS
+3. Backend auto-creates private `#reddalert-alerts` channel (hidden from @everyone, bot has explicit access)
+4. Backend creates webhook in that channel and saves to DB
+5. Popup closes, onboarding page updates with webhook connected
 
 ---
 
@@ -395,7 +402,7 @@ backend/
 │   │   ├── __init__.py          # Router exports
 │   │   ├── auth.py              # JWT auth, PBKDF2-SHA256 password hashing, Bearer token validation
 │   │   ├── clients.py           # POST /api/auth/register, POST /api/auth/login, GET/PATCH /api/clients/me
-│   │   ├── discord.py           # GET /api/discord/auth-url, POST /api/discord/callback (OAuth2 webhook setup)
+│   │   ├── discord.py           # GET /api/discord/auth-url, POST /api/discord/callback (bot creates private channel + webhook)
 │   │   ├── keywords.py          # CRUD /api/keywords (soft delete)
 │   │   ├── subreddits.py        # CRUD /api/subreddits (duplicate detection)
 │   │   ├── webhooks.py          # CRUD /api/webhooks + POST test
@@ -433,7 +440,7 @@ backend/
 │   ├── test_match_engine.py     # 8 tests
 │   ├── test_alert_dispatcher.py # 17 tests
 │   ├── test_api.py              # 47 tests (all endpoints + auth + isolation)
-│   ├── test_discord.py          # 9 tests (OAuth2 auth-url + callback)
+│   ├── test_discord.py          # 11 tests (bot auth-url + callback + error handling)
 │   ├── test_security.py         # 30 tests (password hashing, JWT auth, validation, SSRF, CORS)
 │   └── test_worker.py           # 14 tests
 ├── alembic/                     # Database migrations
@@ -494,8 +501,8 @@ frontend/
 | POST | `/api/subreddits` | Yes | Add subreddit (duplicate check, r/ strip) |
 | PATCH | `/api/subreddits/{id}` | Yes | Update subreddit settings |
 | DELETE | `/api/subreddits/{id}` | Yes | Stop monitoring subreddit |
-| GET | `/api/discord/auth-url` | Yes | Get Discord OAuth2 authorization URL + CSRF state |
-| POST | `/api/discord/callback` | Yes | Exchange Discord auth code for webhook, save to DB |
+| GET | `/api/discord/auth-url` | Yes | Get Discord bot OAuth2 URL (scope=bot) + CSRF state |
+| POST | `/api/discord/callback` | Yes | Accept guild_id, create private channel + webhook, save to DB |
 | GET | `/api/webhooks` | Yes | List webhooks |
 | POST | `/api/webhooks` | Yes | Add Discord webhook (SSRF validated) |
 | PATCH | `/api/webhooks/{id}` | Yes | Update webhook (set primary) |
