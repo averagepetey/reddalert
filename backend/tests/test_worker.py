@@ -327,6 +327,7 @@ class TestJobWrappers:
 
         mock_session.close.assert_called_once()
 
+    @patch("app.worker.main.RETENTION_DAYS", 90)
     @patch("app.worker.main.cleanup_old_data")
     @patch("app.worker.main.SessionLocal")
     def test_retention_job_opens_and_closes_session(

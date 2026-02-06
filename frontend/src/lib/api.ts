@@ -164,10 +164,10 @@ export function getDiscordAuthUrl(): Promise<DiscordAuthUrl> {
   return apiFetch<DiscordAuthUrl>("/discord/auth-url");
 }
 
-export function exchangeDiscordCode(code: string, state: string): Promise<Webhook> {
+export function sendDiscordGuild(guild_id: string, permissions: string, state: string): Promise<Webhook> {
   return apiFetch<Webhook>("/discord/callback", {
     method: "POST",
-    body: JSON.stringify({ code, state }),
+    body: JSON.stringify({ guild_id, permissions, state }),
   });
 }
 

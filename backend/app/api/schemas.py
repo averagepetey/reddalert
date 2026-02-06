@@ -233,15 +233,18 @@ class DiscordAuthUrlResponse(BaseModel):
 
 
 class DiscordCallbackRequest(BaseModel):
-    code: str
+    guild_id: str
+    permissions: str
     state: str
 
-    @field_validator("code")
+    @field_validator("guild_id")
     @classmethod
-    def code_not_empty(cls, v: str) -> str:
+    def guild_id_not_empty(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("Authorization code must not be empty")
+            raise ValueError("guild_id must not be empty")
+        if not v.isdigit():
+            raise ValueError("guild_id must be numeric (Discord snowflake)")
         return v
 
 

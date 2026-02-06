@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { exchangeDiscordCode } from "@/lib/api";
+import { sendDiscordGuild } from "@/lib/api";
 
 function CallbackHandler() {
   const router = useRouter();
@@ -10,12 +10,13 @@ function CallbackHandler() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const code = searchParams.get("code");
+    const guild_id = searchParams.get("guild_id");
+    const permissions = searchParams.get("permissions");
     const state = searchParams.get("state");
     const savedState = localStorage.getItem("discord_oauth_state");
 
-    if (!code || !state) {
-      setError("Missing authorization code or state parameter.");
+    if (!guild_id || !state) {
+      setError("Missing guild ID or state parameter.");
       return;
     }
 
@@ -24,7 +25,7 @@ function CallbackHandler() {
       return;
     }
 
-    exchangeDiscordCode(code, state)
+    sendDiscordGuild(guild_id, permissions || "", state)
       .then(() => {
         localStorage.removeItem("discord_oauth_state");
         router.replace("/onboarding?discord=success");
