@@ -1,4 +1,4 @@
-from .clients import router as clients_router
+from .clients import auth_router, router as clients_router
 from .keywords import router as keywords_router
 from .matches import router as matches_router
 from .stats import router as stats_router
@@ -6,6 +6,7 @@ from .subreddits import router as subreddits_router
 from .webhooks import router as webhooks_router
 
 __all__ = [
+    "auth_router",
     "clients_router",
     "keywords_router",
     "matches_router",

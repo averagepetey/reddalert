@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { clearApiKey } from "@/lib/auth";
+import { clearToken } from "@/lib/auth";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
@@ -17,7 +17,7 @@ export default function Navbar() {
   const pathname = usePathname();
 
   function handleLogout() {
-    clearApiKey();
+    clearToken();
     window.location.href = "/";
   }
 

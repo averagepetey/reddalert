@@ -1,10 +1,9 @@
 """Security-focused tests for Reddalert.
 
 Tests cover:
-- API key hashing (PBKDF2-SHA256, not plaintext)
+- Password hashing (PBKDF2-SHA256, not plaintext)
 - Input validation (subreddit names, webhook URLs, keyword phrases)
 - SSRF prevention (Discord-only webhook URLs)
-- Rate limiting headers
 - Error response safety (no stack trace leakage)
 - Client data isolation
 - CORS configuration
@@ -22,7 +21,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.auth import hash_api_key, rate_limiter, verify_api_key
+from app.api.auth import create_access_token, hash_password, verify_password
 from app.api.schemas import (
     KeywordCreate,
     SubredditCreate,
@@ -71,7 +70,6 @@ def _setup_tables():
     """Create tables before each test, drop after."""
     Base.metadata.create_all(bind=_engine)
     app.dependency_overrides[get_db] = _override_get_db
-    rate_limiter.reset()
     yield
     Base.metadata.drop_all(bind=_engine)
 
@@ -87,73 +85,76 @@ def db_session() -> Iterator[Session]:
 
 @pytest.fixture
 def authenticated_client(db_session: Session):
-    """Create a client and return (client_record, raw_key, headers)."""
-    raw_key = "test-security-key-abc123"
-    hashed = hash_api_key(raw_key)
+    """Create a client and return (client_record, token, headers)."""
+    raw_password = "test-security-password-abc123"
     c = Client(
         id=uuid.uuid4(),
-        api_key=hashed,
         email="security@test.com",
+        password_hash=hash_password(raw_password),
         polling_interval=60,
     )
     db_session.add(c)
     db_session.commit()
     db_session.refresh(c)
-    return c, raw_key, {"X-API-Key": raw_key}
+    token = create_access_token(str(c.id))
+    return c, token, {"Authorization": f"Bearer {token}"}
 
 
 # ===================================================================
-# 1. API Key Security
+# 1. Password Security
 # ===================================================================
 
-class TestApiKeySecurity:
-    """Verify API key hashing uses PBKDF2-SHA256 and is timing-attack resistant."""
+class TestPasswordSecurity:
+    """Verify password hashing uses PBKDF2-SHA256 and is timing-attack resistant."""
 
     def test_hash_is_pbkdf2_sha256(self):
-        """Hashed key should start with $pbkdf2-sha256$ prefix."""
-        hashed = hash_api_key("test-key")
+        """Hashed password should start with $pbkdf2-sha256$ prefix."""
+        hashed = hash_password("test-password")
         assert hashed.startswith("$pbkdf2-sha256$"), f"Expected PBKDF2 hash, got: {hashed[:20]}"
 
     def test_hash_not_plaintext(self):
-        raw = "my-secret-api-key"
-        hashed = hash_api_key(raw)
+        raw = "my-secret-password"
+        hashed = hash_password(raw)
         assert raw not in hashed
 
-    def test_verify_correct_key(self):
-        raw = "correct-key-123"
-        hashed = hash_api_key(raw)
-        assert verify_api_key(raw, hashed)
+    def test_verify_correct_password(self):
+        raw = "correct-password-123"
+        hashed = hash_password(raw)
+        assert verify_password(raw, hashed)
 
-    def test_verify_wrong_key(self):
-        hashed = hash_api_key("correct-key")
-        assert not verify_api_key("wrong-key", hashed)
+    def test_verify_wrong_password(self):
+        hashed = hash_password("correct-password")
+        assert not verify_password("wrong-password", hashed)
 
-    def test_different_keys_different_hashes(self):
-        h1 = hash_api_key("key-one")
-        h2 = hash_api_key("key-two")
+    def test_different_passwords_different_hashes(self):
+        h1 = hash_password("password-one")
+        h2 = hash_password("password-two")
         assert h1 != h2
 
-    def test_same_key_different_hashes(self):
+    def test_same_password_different_hashes(self):
         """PBKDF2 should produce different hashes for the same input (salted)."""
-        h1 = hash_api_key("same-key")
-        h2 = hash_api_key("same-key")
+        h1 = hash_password("same-password")
+        h2 = hash_password("same-password")
         assert h1 != h2  # different salts
 
-    def test_api_key_not_in_get_response(self, authenticated_client):
-        """GET /clients/me should never return the hashed API key."""
+    def test_password_hash_not_in_get_response(self, authenticated_client):
+        """GET /clients/me should never return the password hash."""
         _, _, headers = authenticated_client
         resp = _client.get("/api/clients/me", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert "api_key" not in data
+        assert "password_hash" not in data
 
-    def test_create_client_returns_key_once(self):
-        """POST /clients returns the plaintext key only on creation."""
-        resp = _client.post("/api/clients", json={"email": "new@test.com"})
+    def test_register_returns_token(self):
+        """POST /auth/register returns a JWT token."""
+        resp = _client.post(
+            "/api/auth/register",
+            json={"email": "newuser@test.com", "password": "securepassword123"},
+        )
         assert resp.status_code == 201
         data = resp.json()
-        assert "api_key" in data
-        assert len(data["api_key"]) > 20
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
 
 
 # ===================================================================
@@ -161,9 +162,9 @@ class TestApiKeySecurity:
 # ===================================================================
 
 class TestAuthErrorMessages:
-    """Verify 401 responses do not leak information about key existence."""
+    """Verify 401 responses do not leak information about user existence."""
 
-    def test_missing_key_generic_message(self):
+    def test_missing_auth_header_generic_message(self):
         resp = _client.get("/api/clients/me")
         assert resp.status_code == 401
         detail = resp.json()["detail"]
@@ -171,10 +172,10 @@ class TestAuthErrorMessages:
         assert "client" not in detail.lower()
         assert "database" not in detail.lower()
 
-    def test_invalid_key_generic_message(self, authenticated_client):
+    def test_invalid_token_generic_message(self, authenticated_client):
         resp = _client.get(
             "/api/clients/me",
-            headers={"X-API-Key": "completely-wrong-key-xyz"},
+            headers={"Authorization": "Bearer completely-wrong-token-xyz"},
         )
         assert resp.status_code == 401
         detail = resp.json()["detail"]
@@ -184,43 +185,7 @@ class TestAuthErrorMessages:
 
 
 # ===================================================================
-# 3. Rate Limiting
-# ===================================================================
-
-class TestRateLimiting:
-    def test_rate_limit_returns_429(self, authenticated_client):
-        _, _, headers = authenticated_client
-        rate_limiter.reset()
-        original_max = rate_limiter.max_requests
-        rate_limiter.max_requests = 2
-        try:
-            for _ in range(2):
-                resp = _client.get("/api/clients/me", headers=headers)
-                assert resp.status_code == 200
-            resp = _client.get("/api/clients/me", headers=headers)
-            assert resp.status_code == 429
-        finally:
-            rate_limiter.max_requests = original_max
-
-    def test_rate_limit_headers_on_429(self, authenticated_client):
-        _, _, headers = authenticated_client
-        rate_limiter.reset()
-        original_max = rate_limiter.max_requests
-        rate_limiter.max_requests = 1
-        try:
-            _client.get("/api/clients/me", headers=headers)
-            resp = _client.get("/api/clients/me", headers=headers)
-            assert resp.status_code == 429
-            assert "X-RateLimit-Limit" in resp.headers
-            assert "X-RateLimit-Remaining" in resp.headers
-            assert resp.headers["X-RateLimit-Remaining"] == "0"
-            assert "Retry-After" in resp.headers
-        finally:
-            rate_limiter.max_requests = original_max
-
-
-# ===================================================================
-# 4. Subreddit Name Validation (schema-level)
+# 3. Subreddit Name Validation (schema-level)
 # ===================================================================
 
 class TestSubredditValidation:
@@ -253,7 +218,7 @@ class TestSubredditValidation:
 
 
 # ===================================================================
-# 5. Webhook URL Validation (schema-level, SSRF Prevention)
+# 4. Webhook URL Validation (schema-level, SSRF Prevention)
 # ===================================================================
 
 class TestWebhookUrlValidation:
@@ -295,7 +260,7 @@ class TestWebhookUrlValidation:
 
 
 # ===================================================================
-# 6. Keyword Phrase Validation (schema-level)
+# 5. Keyword Phrase Validation (schema-level)
 # ===================================================================
 
 class TestKeywordPhraseValidation:
@@ -326,7 +291,7 @@ class TestKeywordPhraseValidation:
 
 
 # ===================================================================
-# 7. Pagination Limits (API-level)
+# 6. Pagination Limits (API-level)
 # ===================================================================
 
 class TestPaginationLimits:
@@ -343,7 +308,7 @@ class TestPaginationLimits:
 
 
 # ===================================================================
-# 8. Error Response Safety
+# 7. Error Response Safety
 # ===================================================================
 
 class TestErrorResponseSafety:
@@ -364,24 +329,22 @@ class TestErrorResponseSafety:
 
 
 # ===================================================================
-# 9. Client Data Isolation
+# 8. Client Data Isolation
 # ===================================================================
 
 class TestClientIsolation:
     def test_cannot_access_other_client_keywords(self, db_session: Session):
         """Client A cannot see or modify Client B's data."""
-        key_a = "client-a-isolation-test"
-        key_b = "client-b-isolation-test"
         c_a = Client(
             id=uuid.uuid4(),
-            api_key=hash_api_key(key_a),
             email="a@test.com",
+            password_hash=hash_password("password-a-isolation"),
             polling_interval=60,
         )
         c_b = Client(
             id=uuid.uuid4(),
-            api_key=hash_api_key(key_b),
             email="b@test.com",
+            password_hash=hash_password("password-b-isolation"),
             polling_interval=60,
         )
         db_session.add_all([c_a, c_b])
@@ -395,28 +358,34 @@ class TestClientIsolation:
         db_session.add(kw)
         db_session.commit()
 
+        token_a = create_access_token(str(c_a.id))
+        headers_a = {"Authorization": f"Bearer {token_a}"}
+
+        token_b = create_access_token(str(c_b.id))
+        headers_b = {"Authorization": f"Bearer {token_b}"}
+
         resp = _client.get(
             "/api/keywords",
-            headers={"X-API-Key": key_a},
+            headers=headers_a,
         )
         assert resp.status_code == 200
         assert len(resp.json()) == 0
 
         resp = _client.get(
             f"/api/keywords/{kw.id}",
-            headers={"X-API-Key": key_a},
+            headers=headers_a,
         )
         assert resp.status_code == 404
 
         resp = _client.delete(
             f"/api/keywords/{kw.id}",
-            headers={"X-API-Key": key_a},
+            headers=headers_a,
         )
         assert resp.status_code == 404
 
 
 # ===================================================================
-# 10. CORS Configuration
+# 9. CORS Configuration
 # ===================================================================
 
 class TestCORSConfiguration:
@@ -444,7 +413,7 @@ class TestCORSConfiguration:
 
 
 # ===================================================================
-# 11. Match Response Safety
+# 10. Match Response Safety
 # ===================================================================
 
 class TestMatchResponseSafety:

@@ -9,8 +9,8 @@ from .base import Base, UUIDPrimaryKeyMixin
 class Client(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "clients"
 
-    api_key = Column(String, unique=True, nullable=False)
-    email = Column(String, nullable=True)
+    email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
     polling_interval = Column(Integer, default=60, nullable=False)
     created_at = Column(
         DateTime(timezone=True),

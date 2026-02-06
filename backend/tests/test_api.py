@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.compiler import compiles as sa_compiles
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.auth import hash_api_key, rate_limiter, verify_api_key
+from app.api.auth import create_access_token, hash_password, verify_password
 from app.database import get_db
 from app.main import app
 from app.models.base import Base
@@ -107,8 +107,6 @@ def setup_db():
 
     app.dependency_overrides[get_db] = override_get_db
 
-    rate_limiter.reset()
-
     yield TestSession
 
     transaction.rollback()
@@ -134,26 +132,26 @@ def test_client():
 
 @pytest.fixture
 def test_client_record(db_session: Session):
-    """Create a client with a known API key for authenticated requests."""
-    raw_key = "test-api-key-12345"
-    hashed = hash_api_key(raw_key)
+    """Create a client with a known password for authenticated requests."""
+    raw_password = "test-password-12345"
     c = Client(
         id=uuid.uuid4(),
-        api_key=hashed,
         email="test@example.com",
+        password_hash=hash_password(raw_password),
         polling_interval=60,
     )
     db_session.add(c)
     db_session.commit()
     db_session.refresh(c)
-    return c, raw_key
+    token = create_access_token(str(c.id))
+    return c, token
 
 
 @pytest.fixture
 def auth_headers(test_client_record):
-    """Return headers with valid API key."""
-    _, raw_key = test_client_record
-    return {"X-API-Key": raw_key}
+    """Return headers with valid Bearer token."""
+    _, token = test_client_record
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -251,49 +249,89 @@ def test_match(db_session: Session, test_client_record, test_keyword):
 # ---------------------------------------------------------------------------
 
 class TestAuth:
-    def test_missing_api_key(self, test_client):
+    def test_missing_auth_header(self, test_client):
         resp = test_client.get("/api/clients/me")
         assert resp.status_code == 401
         assert "Missing" in resp.json()["detail"]
 
-    def test_invalid_api_key(self, test_client, test_client_record):
+    def test_invalid_token(self, test_client, test_client_record):
         resp = test_client.get(
             "/api/clients/me",
-            headers={"X-API-Key": "totally-wrong-key"},
+            headers={"Authorization": "Bearer totally-wrong-token"},
         )
         assert resp.status_code == 401
         assert "Invalid" in resp.json()["detail"]
 
-    def test_valid_api_key(self, test_client, auth_headers, test_client_record):
+    def test_valid_token(self, test_client, auth_headers, test_client_record):
         resp = test_client.get("/api/clients/me", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["email"] == "test@example.com"
 
-    def test_rate_limiting(self, test_client, auth_headers, test_client_record):
-        """After max requests, should return 429."""
-        rate_limiter.reset()
-        original_max = rate_limiter.max_requests
-        rate_limiter.max_requests = 3
-        try:
-            for _ in range(3):
-                resp = test_client.get("/api/clients/me", headers=auth_headers)
-                assert resp.status_code == 200
-            resp = test_client.get("/api/clients/me", headers=auth_headers)
-            assert resp.status_code == 429
-        finally:
-            rate_limiter.max_requests = original_max
 
-
-class TestApiKeyHashing:
+class TestPasswordHashing:
     def test_hash_and_verify(self):
-        raw = "my-secret-key-123"
-        hashed = hash_api_key(raw)
+        raw = "my-secret-password-123"
+        hashed = hash_password(raw)
         assert hashed != raw
-        assert verify_api_key(raw, hashed)
+        assert verify_password(raw, hashed)
 
-    def test_wrong_key_fails(self):
-        hashed = hash_api_key("correct-key")
-        assert not verify_api_key("wrong-key", hashed)
+    def test_wrong_password_fails(self):
+        hashed = hash_password("correct-password")
+        assert not verify_password("wrong-password", hashed)
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoint tests (register / login)
+# ---------------------------------------------------------------------------
+
+class TestAuthEndpoints:
+    def test_register(self, test_client):
+        resp = test_client.post(
+            "/api/auth/register",
+            json={"email": "new@example.com", "password": "securepassword123"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+
+    def test_register_duplicate_email(self, test_client, test_client_record):
+        resp = test_client.post(
+            "/api/auth/register",
+            json={"email": "test@example.com", "password": "securepassword123"},
+        )
+        assert resp.status_code == 409
+
+    def test_register_short_password(self, test_client):
+        resp = test_client.post(
+            "/api/auth/register",
+            json={"email": "short@example.com", "password": "short"},
+        )
+        assert resp.status_code == 422
+
+    def test_login(self, test_client, test_client_record):
+        resp = test_client.post(
+            "/api/auth/login",
+            json={"email": "test@example.com", "password": "test-password-12345"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+
+    def test_login_wrong_password(self, test_client, test_client_record):
+        resp = test_client.post(
+            "/api/auth/login",
+            json={"email": "test@example.com", "password": "wrong-password"},
+        )
+        assert resp.status_code == 401
+
+    def test_login_nonexistent_email(self, test_client):
+        resp = test_client.post(
+            "/api/auth/login",
+            json={"email": "nobody@example.com", "password": "somepassword123"},
+        )
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -301,31 +339,12 @@ class TestApiKeyHashing:
 # ---------------------------------------------------------------------------
 
 class TestClientEndpoints:
-    def test_create_client(self, test_client):
-        resp = test_client.post(
-            "/api/clients",
-            json={"email": "new@example.com", "polling_interval": 30},
-        )
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["email"] == "new@example.com"
-        assert data["polling_interval"] == 30
-        assert "api_key" in data
-        assert len(data["api_key"]) > 20
-
-    def test_create_client_defaults(self, test_client):
-        resp = test_client.post("/api/clients", json={})
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["polling_interval"] == 60
-        assert data["email"] is None
-
     def test_get_me(self, test_client, auth_headers, test_client_record):
         resp = test_client.get("/api/clients/me", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["email"] == "test@example.com"
-        assert "api_key" not in data
+        assert "password_hash" not in data
 
     def test_update_me(self, test_client, auth_headers, test_client_record):
         resp = test_client.patch(
@@ -347,13 +366,6 @@ class TestClientEndpoints:
         assert resp.status_code == 200
         assert resp.json()["email"] == "partial@example.com"
         assert resp.json()["polling_interval"] == 60
-
-    def test_create_client_invalid_interval(self, test_client):
-        resp = test_client.post(
-            "/api/clients",
-            json={"polling_interval": 0},
-        )
-        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -700,21 +712,19 @@ class TestHealthCheck:
 class TestClientIsolation:
     def test_cannot_see_other_clients_keywords(self, test_client, db_session: Session):
         """Client A should not see Client B's keywords."""
-        key_a = "client-a-key-12345"
         client_a = Client(
             id=uuid.uuid4(),
-            api_key=hash_api_key(key_a),
             email="a@test.com",
+            password_hash=hash_password("password-a-12345"),
             polling_interval=60,
         )
         db_session.add(client_a)
         db_session.flush()
 
-        key_b = "client-b-key-12345"
         client_b = Client(
             id=uuid.uuid4(),
-            api_key=hash_api_key(key_b),
             email="b@test.com",
+            password_hash=hash_password("password-b-12345"),
             polling_interval=60,
         )
         db_session.add(client_b)
@@ -728,16 +738,19 @@ class TestClientIsolation:
         db_session.add(kw)
         db_session.commit()
 
+        token_a = create_access_token(str(client_a.id))
+        token_b = create_access_token(str(client_b.id))
+
         resp = test_client.get(
             "/api/keywords",
-            headers={"X-API-Key": key_a},
+            headers={"Authorization": f"Bearer {token_a}"},
         )
         assert resp.status_code == 200
         assert resp.json() == []
 
         resp = test_client.get(
             "/api/keywords",
-            headers={"X-API-Key": key_b},
+            headers={"Authorization": f"Bearer {token_b}"},
         )
         assert resp.status_code == 200
         assert len(resp.json()) == 1

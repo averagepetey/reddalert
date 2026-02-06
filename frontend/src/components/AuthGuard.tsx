@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getApiKey } from "@/lib/auth";
+import { getToken } from "@/lib/auth";
 import Navbar from "./Navbar";
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -10,7 +10,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (!getApiKey()) {
+    if (!getToken()) {
       router.replace("/");
     } else {
       setChecked(true);

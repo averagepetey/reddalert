@@ -85,15 +85,6 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-neutral-300">
-              API Key
-            </label>
-            <div className="mt-1 rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-neutral-500">
-              {settings.api_key_masked}
-            </div>
-          </div>
-
           <button
             type="submit"
             disabled={loading}

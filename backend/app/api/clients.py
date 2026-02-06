@@ -5,31 +5,47 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.clients import Client
-from .auth import get_current_client, hash_api_key
-from .schemas import ClientCreate, ClientCreateResponse, ClientResponse, ClientUpdate, generate_api_key
+from .auth import create_access_token, get_current_client, hash_password, verify_password
+from .schemas import ClientResponse, ClientUpdate, LoginRequest, RegisterRequest, TokenResponse
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-@router.post("", response_model=ClientCreateResponse, status_code=status.HTTP_201_CREATED)
-def create_client(payload: ClientCreate, db: Session = Depends(get_db)):
-    """Create a new client. Returns the API key in plaintext (only time it is shown)."""
-    raw_key = generate_api_key()
-    hashed_key = hash_api_key(raw_key)
+@auth_router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new client with email and password. Returns a JWT token."""
+    existing = db.query(Client).filter(Client.email == payload.email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
 
     client = Client(
-        api_key=hashed_key,
         email=payload.email,
-        polling_interval=payload.polling_interval,
+        password_hash=hash_password(payload.password),
     )
     db.add(client)
     db.commit()
     db.refresh(client)
 
-    # Build response with plaintext key
-    resp = ClientCreateResponse.model_validate(client)
-    resp.api_key = raw_key
-    return resp
+    token = create_access_token(str(client.id))
+    return TokenResponse(access_token=token)
+
+
+@auth_router.post("/login", response_model=TokenResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate with email and password. Returns a JWT token."""
+    client = db.query(Client).filter(Client.email == payload.email).first()
+    if not client or not verify_password(payload.password, client.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    token = create_access_token(str(client.id))
+    return TokenResponse(access_token=token)
 
 
 @router.get("/me", response_model=ClientResponse)

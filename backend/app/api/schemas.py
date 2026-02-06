@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-import secrets
 import socket
 import uuid
 from datetime import datetime
@@ -32,19 +31,6 @@ def _sanitize(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# API key generation (prefixed)
-# ---------------------------------------------------------------------------
-
-API_KEY_PREFIX = "rda_"
-
-
-def generate_api_key() -> str:
-    """Generate a cryptographically secure API key with a recognizable prefix."""
-    random_part = secrets.token_urlsafe(32)
-    return f"{API_KEY_PREFIX}{random_part}"
-
-
-# ---------------------------------------------------------------------------
 # SSRF prevention for webhook URLs
 # ---------------------------------------------------------------------------
 
@@ -69,25 +55,40 @@ def _check_ssrf(hostname: str) -> None:
             continue
 
 
+# --- Auth schemas ---
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+
+    @field_validator("email")
+    @classmethod
+    def email_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Email must not be empty")
+        return v
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
 # --- Client schemas ---
-
-class ClientCreate(BaseModel):
-    email: Optional[str] = None
-    polling_interval: int = Field(default=60, ge=1, le=1440)
-
 
 class ClientResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: Optional[str]
+    email: str
     polling_interval: int
     created_at: datetime
-    api_key_masked: str = "rda_••••••••••••"
-
-
-class ClientCreateResponse(ClientResponse):
-    api_key: str  # plaintext, only returned on creation
 
 
 class ClientUpdate(BaseModel):

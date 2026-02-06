@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .api import (
+    auth_router,
     clients_router,
     keywords_router,
     matches_router,
@@ -44,13 +45,14 @@ app.add_middleware(
     allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
 
+app.include_router(auth_router)
 app.include_router(clients_router)
 app.include_router(keywords_router)
 app.include_router(subreddits_router)

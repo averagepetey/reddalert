@@ -18,9 +18,22 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 // --- Auth ---
 
-export function validateApiKey(apiKey: string) {
-  return apiFetch<ClientSettings>("/clients/me", {
-    headers: { "X-API-Key": apiKey },
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+}
+
+export function login(email: string, password: string) {
+  return apiFetch<AuthResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function register(email: string, password: string) {
+  return apiFetch<AuthResponse>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
   });
 }
 
@@ -212,9 +225,10 @@ export function getStats() {
 // --- Client settings ---
 
 export interface ClientSettings {
-  polling_interval: number;
+  id: string;
   email: string;
-  api_key_masked: string;
+  polling_interval: number;
+  created_at: string;
 }
 
 export function getSettings() {
