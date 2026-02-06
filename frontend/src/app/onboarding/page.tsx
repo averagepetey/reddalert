@@ -13,6 +13,8 @@ import {
   createKeyword,
   getDiscordAuthUrl,
   getWebhooks,
+  getSubreddits,
+  getKeywords,
 } from "@/lib/api";
 
 const STEPS = ["Webhook", "Subreddits", "Keywords", "Confirm"];
@@ -23,6 +25,7 @@ function OnboardingContent() {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   // Step 1: Webhook
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -33,8 +36,67 @@ function OnboardingContent() {
   const [discordConnected, setDiscordConnected] = useState(false);
   const [discordAvailable, setDiscordAvailable] = useState(true);
 
-  // Check if returning from Discord OAuth (fallback for non-popup)
+  // Step 2: Subreddits
+  const [subredditName, setSubredditName] = useState("");
+  const [subreddits, setSubreddits] = useState<string[]>([]);
+  const [existingSubreddits, setExistingSubreddits] = useState<string[]>([]);
+
+  // Step 3: Keywords
+  const [phrases, setPhrases] = useState<string[]>([]);
+  const [exclusions, setExclusions] = useState<string[]>([]);
+  const [existingKeywords, setExistingKeywords] = useState<string[]>([]);
+
+  // Load existing progress on mount
   useEffect(() => {
+    async function loadProgress() {
+      try {
+        const [webhooks, subs, keywords] = await Promise.all([
+          getWebhooks().catch(() => []),
+          getSubreddits().catch(() => []),
+          getKeywords().catch(() => []),
+        ]);
+
+        let startStep = 0;
+
+        // Check webhooks
+        const primary = webhooks.find((w) => w.is_primary) || webhooks[0];
+        if (primary) {
+          setWebhookUrl(primary.url);
+          setWebhookId(primary.id);
+          setWebhookTested(true);
+          setDiscordConnected(true);
+          startStep = 1;
+        }
+
+        // Check subreddits
+        if (subs.length > 0) {
+          const subNames = subs.map((s) => s.name);
+          setExistingSubreddits(subNames);
+          if (startStep === 1) startStep = 2;
+        }
+
+        // Check keywords
+        if (keywords.length > 0) {
+          const kwPhrases = keywords.flatMap((k) => k.phrases);
+          setExistingKeywords(kwPhrases);
+          if (startStep === 2) startStep = 3;
+        }
+
+        // If everything is done, go to dashboard
+        if (startStep === 3) {
+          router.replace("/dashboard");
+          return;
+        }
+
+        setStep(startStep);
+      } catch {
+        // Failed to load — start from beginning
+      } finally {
+        setInitialLoading(false);
+      }
+    }
+
+    // Handle Discord OAuth fallback redirect
     if (searchParams.get("discord") === "success") {
       getWebhooks()
         .then((webhooks) => {
@@ -44,19 +106,15 @@ function OnboardingContent() {
             setWebhookId(primary.id);
             setWebhookTested(true);
             setDiscordConnected(true);
+            setStep(1);
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setInitialLoading(false));
+    } else {
+      loadProgress();
     }
-  }, [searchParams]);
-
-  // Step 2: Subreddits
-  const [subredditName, setSubredditName] = useState("");
-  const [subreddits, setSubreddits] = useState<string[]>([]);
-
-  // Step 3: Keywords
-  const [phrases, setPhrases] = useState<string[]>([]);
-  const [exclusions, setExclusions] = useState<string[]>([]);
+  }, [searchParams, router]);
 
   async function handleConnectDiscord() {
     setLoading(true);
@@ -123,7 +181,7 @@ function OnboardingContent() {
 
   function handleAddSubreddit() {
     const name = subredditName.trim().replace(/^r\//, "");
-    if (name && !subreddits.includes(name)) {
+    if (name && !subreddits.includes(name) && !existingSubreddits.includes(name)) {
       setSubreddits([...subreddits, name]);
     }
     setSubredditName("");
@@ -133,11 +191,11 @@ function OnboardingContent() {
     setLoading(true);
     setError("");
     try {
-      // Add subreddits
+      // Add only new subreddits (skip already-saved ones)
       for (const name of subreddits) {
         await addSubreddit({ name });
       }
-      // Add keyword
+      // Add keyword only if new phrases were entered
       if (phrases.length > 0) {
         await createKeyword({
           phrases,
@@ -150,6 +208,16 @@ function OnboardingContent() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (initialLoading) {
+    return (
+      <AuthGuard>
+        <div className="mx-auto max-w-2xl mt-10 text-center text-neutral-400">
+          Loading your progress...
+        </div>
+      </AuthGuard>
+    );
   }
 
   return (
@@ -245,6 +313,18 @@ function OnboardingContent() {
               <p className="text-sm text-neutral-400">
                 Enter subreddit names to monitor (without r/ prefix).
               </p>
+
+              {existingSubreddits.length > 0 && (
+                <div className="rounded-lg border border-green-700 bg-green-900/30 px-4 py-3">
+                  <p className="text-sm font-medium text-green-400">
+                    Already monitoring:
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-300">
+                    {existingSubreddits.map((s) => `r/${s}`).join(", ")}
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -288,7 +368,7 @@ function OnboardingContent() {
                 </button>
                 <button
                   onClick={() => setStep(2)}
-                  disabled={subreddits.length === 0}
+                  disabled={subreddits.length === 0 && existingSubreddits.length === 0}
                   className="rounded-lg bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   Next
@@ -304,6 +384,18 @@ function OnboardingContent() {
               <p className="text-sm text-neutral-400">
                 Type a phrase and press Enter to add. These phrases form an OR group.
               </p>
+
+              {existingKeywords.length > 0 && (
+                <div className="rounded-lg border border-green-700 bg-green-900/30 px-4 py-3">
+                  <p className="text-sm font-medium text-green-400">
+                    Existing keywords:
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-300">
+                    {existingKeywords.join(", ")}
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm text-neutral-300 mb-1">Phrases</label>
                 <ChipInput
@@ -334,7 +426,7 @@ function OnboardingContent() {
                 </button>
                 <button
                   onClick={() => setStep(3)}
-                  disabled={phrases.length === 0}
+                  disabled={phrases.length === 0 && existingKeywords.length === 0}
                   className="rounded-lg bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   Next
@@ -354,11 +446,15 @@ function OnboardingContent() {
                 </div>
                 <div>
                   <p className="text-xs text-neutral-500">Subreddits</p>
-                  <p className="text-sm text-white">{subreddits.map((s) => `r/${s}`).join(", ")}</p>
+                  <p className="text-sm text-white">
+                    {[...existingSubreddits, ...subreddits].map((s) => `r/${s}`).join(", ") || "None"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-neutral-500">Keywords</p>
-                  <p className="text-sm text-white">{phrases.join(", ")}</p>
+                  <p className="text-sm text-white">
+                    {[...existingKeywords, ...phrases].join(", ") || "None"}
+                  </p>
                   {exclusions.length > 0 && (
                     <p className="text-xs text-neutral-400 mt-1">
                       Excluding: {exclusions.join(", ")}
@@ -366,21 +462,39 @@ function OnboardingContent() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={() => setStep(2)}
-                  className="rounded-lg bg-neutral-800 px-6 py-2 text-sm text-white hover:bg-neutral-700"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleFinish}
-                  disabled={loading}
-                  className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
-                >
-                  {loading ? "Setting up..." : "Start Monitoring"}
-                </button>
-              </div>
+
+              {subreddits.length === 0 && phrases.length === 0 ? (
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="rounded-lg bg-neutral-800 px-6 py-2 text-sm text-white hover:bg-neutral-700"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={() => router.push("/dashboard")}
+                    className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700"
+                  >
+                    Go to Dashboard
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="rounded-lg bg-neutral-800 px-6 py-2 text-sm text-white hover:bg-neutral-700"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleFinish}
+                    disabled={loading}
+                    className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {loading ? "Setting up..." : "Start Monitoring"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
