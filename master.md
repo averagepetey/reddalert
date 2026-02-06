@@ -72,7 +72,7 @@
 | Feature            | Behavior                |
 |--------------------|-------------------------|
 | Architecture       | Multi-tenant from day 1 |
-| Auth               | API key for v1          |
+| Auth               | Email/password + JWT    |
 | Per-client polling | Configurable interval   |
 
 ---
@@ -203,9 +203,11 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 
 ### 6. REST API
 
-- Auth: API key validation per request
+- Auth: Email/password registration + login, JWT Bearer token per request
 - Endpoints:
-  - `POST /clients` — create client
+  - `POST /auth/register` — register with email + password, returns JWT
+  - `POST /auth/login` — login with email + password, returns JWT
+  - `GET/PATCH /clients/me` — view/update client settings
   - `GET/POST/DELETE /keywords` — manage keyword phrases
   - `GET/POST/DELETE /subreddits` — manage monitored subs
   - `GET/POST /webhooks` — manage Discord webhooks
@@ -228,8 +230,8 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 ```
 Client
 ├── id (uuid)
-├── api_key (hashed)
-├── email (backup contact)
+├── email (unique, required)
+├── password_hash (PBKDF2-SHA256)
 ├── polling_interval (minutes)
 ├── created_at
 │
@@ -379,8 +381,8 @@ backend/
 ├── app/
 │   ├── api/
 │   │   ├── __init__.py          # Router exports
-│   │   ├── auth.py              # API key auth, PBKDF2-SHA256 hashing, rate limiter
-│   │   ├── clients.py           # POST /api/clients, GET/PATCH /api/clients/me
+│   │   ├── auth.py              # JWT auth, PBKDF2-SHA256 password hashing, Bearer token validation
+│   │   ├── clients.py           # POST /api/auth/register, POST /api/auth/login, GET/PATCH /api/clients/me
 │   │   ├── keywords.py          # CRUD /api/keywords (soft delete)
 │   │   ├── subreddits.py        # CRUD /api/subreddits (duplicate detection)
 │   │   ├── webhooks.py          # CRUD /api/webhooks + POST test
@@ -418,7 +420,7 @@ backend/
 │   ├── test_match_engine.py     # 8 tests
 │   ├── test_alert_dispatcher.py # 17 tests
 │   ├── test_api.py              # 47 tests (all endpoints + auth + isolation)
-│   ├── test_security.py         # 38 tests (hashing, validation, SSRF, CORS, rate limiting)
+│   ├── test_security.py         # 30 tests (password hashing, JWT auth, validation, SSRF, CORS)
 │   └── test_worker.py           # 14 tests
 ├── alembic/                     # Database migrations
 ├── requirements.txt
@@ -453,7 +455,7 @@ frontend/
 │   │   └── EmptyState.tsx       # Placeholder for empty lists
 │   └── lib/
 │       ├── api.ts               # API client (apiFetch, typed endpoints)
-│       └── auth.ts              # localStorage API key management
+│       └── auth.ts              # localStorage JWT token management
 ├── package.json
 ├── tailwind.config.ts
 ├── tsconfig.json
@@ -464,7 +466,8 @@ frontend/
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/clients` | No | Create client, returns plaintext API key |
+| POST | `/api/auth/register` | No | Register with email + password, returns JWT |
+| POST | `/api/auth/login` | No | Login with email + password, returns JWT |
 | GET | `/api/clients/me` | Yes | Get current client info |
 | PATCH | `/api/clients/me` | Yes | Update email / polling interval |
 | GET | `/api/keywords` | Yes | List active keywords |
@@ -488,11 +491,11 @@ frontend/
 
 ### Security Features
 
-- **API key hashing**: PBKDF2-SHA256 with random salt (timing-attack resistant)
-- **Rate limiting**: 100 requests/min per API key prefix, returns `X-RateLimit-*` headers
+- **Password hashing**: PBKDF2-SHA256 with random salt (timing-attack resistant)
+- **JWT auth**: HS256 tokens with 24h expiry, `Authorization: Bearer` header
 - **CORS lockdown**: Only allows `http://localhost:3000` (configurable via `CORS_ORIGINS` env)
 - **SSRF prevention**: Webhook URLs must match Discord webhook pattern only
 - **Input validation**: Subreddit name regex, phrase length limits, angle bracket sanitization
 - **Client isolation**: All queries filter by `client_id`, tested with cross-client assertions
 - **Error safety**: Global exception handler prevents stack trace / path leakage
-- **No plaintext secrets**: API keys hashed before storage, only shown once on creation
+- **No plaintext secrets**: Passwords hashed before storage, JWT secret via `JWT_SECRET` env var
