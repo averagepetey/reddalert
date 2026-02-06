@@ -9,7 +9,7 @@ from ..database import get_db
 from ..models.clients import Client
 from ..models.subreddits import MonitoredSubreddit
 from .auth import get_current_client
-from .schemas import SubredditCreate, SubredditResponse
+from .schemas import SubredditCreate, SubredditResponse, SubredditUpdate
 
 router = APIRouter(prefix="/api/subreddits", tags=["subreddits"])
 
@@ -66,7 +66,7 @@ def add_subreddit(
 @router.patch("/{subreddit_id}", response_model=SubredditResponse)
 def update_subreddit(
     subreddit_id: uuid.UUID,
-    payload: SubredditCreate,
+    payload: SubredditUpdate,
     client: Client = Depends(get_current_client),
     db: Session = Depends(get_db),
 ):
@@ -84,9 +84,12 @@ def update_subreddit(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subreddit not found.",
         )
-    sub.include_media_posts = payload.include_media_posts
-    sub.dedupe_crossposts = payload.dedupe_crossposts
-    sub.filter_bots = payload.filter_bots
+    if payload.include_media_posts is not None:
+        sub.include_media_posts = payload.include_media_posts
+    if payload.dedupe_crossposts is not None:
+        sub.dedupe_crossposts = payload.dedupe_crossposts
+    if payload.filter_bots is not None:
+        sub.filter_bots = payload.filter_bots
     db.commit()
     db.refresh(sub)
     return sub

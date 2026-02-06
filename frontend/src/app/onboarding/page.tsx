@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import StepIndicator from "@/components/StepIndicator";
 import ChipInput from "@/components/ChipInput";
-import { addWebhook, testWebhook, addSubreddit, createKeyword } from "@/lib/api";
+import { addWebhook, testWebhook, deleteWebhook, addSubreddit, createKeyword } from "@/lib/api";
 
 const STEPS = ["Webhook", "Subreddits", "Keywords", "Confirm"];
 
@@ -18,6 +18,7 @@ export default function OnboardingPage() {
   // Step 1: Webhook
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookTested, setWebhookTested] = useState(false);
+  const [webhookId, setWebhookId] = useState<string | null>(null);
 
   // Step 2: Subreddits
   const [subredditName, setSubredditName] = useState("");
@@ -31,7 +32,13 @@ export default function OnboardingPage() {
     setLoading(true);
     setError("");
     try {
+      // Delete previously created webhook to avoid duplicates
+      if (webhookId) {
+        await deleteWebhook(webhookId).catch(() => {});
+        setWebhookId(null);
+      }
       const wh = await addWebhook({ url: webhookUrl, is_primary: true });
+      setWebhookId(wh.id);
       await testWebhook(wh.id);
       setWebhookTested(true);
     } catch {

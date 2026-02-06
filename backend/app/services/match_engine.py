@@ -18,7 +18,7 @@ from app.models.keywords import Keyword
 from app.models.matches import AlertStatus, Match
 from app.models.subreddits import MonitoredSubreddit
 from app.services.matcher import KeywordConfig, MatchResult, find_matches
-from app.services.normalizer import NormalizedResult
+from app.services.normalizer import NormalizedResult, normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +38,7 @@ class MatchEngine:
         if not relevant:
             return []
 
-        normalized = NormalizedResult(
-            normalized_text=content.normalized_text,
-            tokens=content.normalized_text.split() if content.normalized_text else [],
-            sentences=[],
-        )
+        normalized = normalize_text(content.normalized_text or "")
 
         # Collect all match results grouped by client so we can populate
         # also_matched across keywords for the same client.
@@ -71,6 +67,13 @@ class MatchEngine:
                 # Look up the client from the first pair (all share the same
                 # client within a client_key group).
                 client = keyword.client
+
+                if self._match_exists(client.id, keyword.id, content.id):
+                    logger.debug(
+                        "Skipping duplicate match: client=%s keyword=%s content=%s",
+                        client.id, keyword.id, content.id,
+                    )
+                    continue
 
                 match_record = self._create_match_record(
                     client=client,
@@ -142,6 +145,19 @@ class MatchEngine:
             proximity_window=keyword.proximity_window,
             require_order=keyword.require_order,
             use_stemming=keyword.use_stemming,
+        )
+
+    def _match_exists(self, client_id, keyword_id, content_id) -> bool:
+        """Check if a match with this (client, keyword, content) triple already exists."""
+        return (
+            self.db.query(Match.id)
+            .filter(
+                Match.client_id == client_id,
+                Match.keyword_id == keyword_id,
+                Match.content_id == content_id,
+            )
+            .first()
+            is not None
         )
 
     def _create_match_record(

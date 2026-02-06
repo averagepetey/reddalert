@@ -14,6 +14,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
+from app.models.clients import Client
 from app.models.matches import AlertStatus, Match
 from app.models.webhooks import WebhookConfig
 
@@ -250,11 +251,39 @@ class AlertDispatcher:
 
         return False
 
-    @staticmethod
-    def _handle_failure(match: Match) -> None:
-        """Mark a match as failed after retries are exhausted."""
+    def _handle_failure(self, match: Match) -> None:
+        """Mark a match as failed after retries are exhausted, then attempt email fallback."""
         match.alert_status = AlertStatus.failed
         logger.error(
             "Alert delivery failed for match %s (keyword=%s, subreddit=%s)",
             match.id, match.matched_phrase, match.subreddit,
+        )
+
+        # Attempt email fallback to the client's registered email
+        client = self.db.query(Client).filter(Client.id == match.client_id).first()
+        if client and client.email:
+            self._send_failure_email(
+                to_email=client.email,
+                match=match,
+            )
+        else:
+            logger.warning(
+                "No email on file for client %s — cannot send failure notification",
+                match.client_id,
+            )
+
+    @staticmethod
+    def _send_failure_email(to_email: str, match: Match) -> None:
+        """Send a failure notification email when webhook delivery fails.
+
+        This is a stub — replace with real SMTP or SendGrid integration.
+        """
+        logger.info(
+            "EMAIL STUB: Would send failure notification to %s for match %s "
+            "(phrase=%s, subreddit=r/%s, url=%s)",
+            to_email,
+            match.id,
+            match.matched_phrase,
+            match.subreddit,
+            match.reddit_url,
         )

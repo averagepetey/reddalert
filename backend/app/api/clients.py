@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import secrets
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.clients import Client
 from .auth import get_current_client, hash_api_key
-from .schemas import ClientCreate, ClientCreateResponse, ClientResponse, ClientUpdate
+from .schemas import ClientCreate, ClientCreateResponse, ClientResponse, ClientUpdate, generate_api_key
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
@@ -16,7 +14,7 @@ router = APIRouter(prefix="/api/clients", tags=["clients"])
 @router.post("", response_model=ClientCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_client(payload: ClientCreate, db: Session = Depends(get_db)):
     """Create a new client. Returns the API key in plaintext (only time it is shown)."""
-    raw_key = secrets.token_urlsafe(32)
+    raw_key = generate_api_key()
     hashed_key = hash_api_key(raw_key)
 
     client = Client(

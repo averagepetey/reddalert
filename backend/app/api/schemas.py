@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import ipaddress
 import re
+import secrets
+import socket
 import uuid
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -27,6 +31,44 @@ def _sanitize(value: str) -> str:
     return value.strip().replace("<", "").replace(">", "")
 
 
+# ---------------------------------------------------------------------------
+# API key generation (prefixed)
+# ---------------------------------------------------------------------------
+
+API_KEY_PREFIX = "rda_"
+
+
+def generate_api_key() -> str:
+    """Generate a cryptographically secure API key with a recognizable prefix."""
+    random_part = secrets.token_urlsafe(32)
+    return f"{API_KEY_PREFIX}{random_part}"
+
+
+# ---------------------------------------------------------------------------
+# SSRF prevention for webhook URLs
+# ---------------------------------------------------------------------------
+
+def _check_ssrf(hostname: str) -> None:
+    """Check that a hostname does not resolve to a private/internal IP."""
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        raise ValueError("Could not resolve webhook hostname")
+
+    for family, type_, proto, canonname, sockaddr in addr_infos:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                raise ValueError(
+                    "Webhook URL must not point to a private or internal address"
+                )
+        except ValueError as e:
+            if "private" in str(e) or "resolve" in str(e):
+                raise
+            continue
+
+
 # --- Client schemas ---
 
 class ClientCreate(BaseModel):
@@ -41,6 +83,7 @@ class ClientResponse(BaseModel):
     email: Optional[str]
     polling_interval: int
     created_at: datetime
+    api_key_masked: str = "rda_••••••••••••"
 
 
 class ClientCreateResponse(ClientResponse):
@@ -161,6 +204,12 @@ class SubredditCreate(BaseModel):
         return v
 
 
+class SubredditUpdate(BaseModel):
+    include_media_posts: Optional[bool] = None
+    dedupe_crossposts: Optional[bool] = None
+    filter_bots: Optional[bool] = None
+
+
 class SubredditResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -192,6 +241,35 @@ class WebhookCreate(BaseModel):
                 "Webhook URL must be a valid Discord webhook URL "
                 "(https://discord.com/api/webhooks/...)"
             )
+        # SSRF prevention: resolve hostname and check for private IPs
+        parsed = urlparse(v)
+        hostname = parsed.hostname
+        if hostname:
+            _check_ssrf(hostname)
+        return v
+
+
+class WebhookUpdate(BaseModel):
+    url: Optional[str] = None
+    is_primary: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("url")
+    @classmethod
+    def validate_webhook_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            if not v.startswith("https://"):
+                raise ValueError("Webhook URL must use HTTPS")
+            if not _DISCORD_WEBHOOK_RE.match(v):
+                raise ValueError(
+                    "Webhook URL must be a valid Discord webhook URL "
+                    "(https://discord.com/api/webhooks/...)"
+                )
+            parsed = urlparse(v)
+            hostname = parsed.hostname
+            if hostname:
+                _check_ssrf(hostname)
         return v
 
 

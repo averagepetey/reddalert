@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,6 +23,8 @@ def list_matches(
     subreddit: Optional[str] = Query(default=None),
     keyword_id: Optional[uuid.UUID] = Query(default=None),
     alert_status: Optional[str] = Query(default=None),
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
     client: Client = Depends(get_current_client),
     db: Session = Depends(get_db),
 ):
@@ -34,6 +37,12 @@ def list_matches(
         query = query.filter(Match.keyword_id == keyword_id)
     if alert_status:
         query = query.filter(Match.alert_status == alert_status)
+    if start_date:
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        query = query.filter(Match.detected_at >= start_dt)
+    if end_date:
+        end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+        query = query.filter(Match.detected_at <= end_dt)
 
     total = query.count()
     items = (
