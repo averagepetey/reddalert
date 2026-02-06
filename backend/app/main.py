@@ -15,6 +15,11 @@ from .api import (
     subreddits_router,
     webhooks_router,
 )
+from .database import DATABASE_URL, engine
+from .models.base import Base
+
+# Import all models so Base.metadata knows about them
+from .models import clients, content, keywords, matches, subreddits, webhooks  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         status_code=500,
         content={"detail": "Internal server error"},
     )
+
+
+@app.on_event("startup")
+def on_startup():
+    if DATABASE_URL.startswith("sqlite"):
+        Base.metadata.create_all(bind=engine)
+        logger.info("SQLite mode: tables created automatically")
 
 
 @app.get("/health")

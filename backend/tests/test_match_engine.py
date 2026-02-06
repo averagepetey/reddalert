@@ -103,6 +103,8 @@ def _mock_session(monitored_subs=None, keywords=None):
         elif model is Keyword:
             q.filter.return_value.all.return_value = keywords or []
         else:
+            # Match.id queries for duplicate check — return None (no existing match)
+            q.filter.return_value.first.return_value = None
             q.filter.return_value.all.return_value = []
         return q
 
@@ -181,6 +183,9 @@ class TestMultiClientFanOut:
                 else:
                     q.filter.return_value.all.return_value = [kw_b]
                 call_count["kw"] += 1
+            else:
+                # Match.id queries for duplicate check — no existing match
+                q.filter.return_value.first.return_value = None
             return q
 
         session = MagicMock()

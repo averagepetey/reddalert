@@ -5,6 +5,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -546,10 +547,15 @@ class TestWebhookEndpoints:
         assert resp.status_code == 422
 
     def test_test_webhook(self, test_client, auth_headers, test_webhook):
-        resp = test_client.post(
-            f"/api/webhooks/{test_webhook.id}/test",
-            headers=auth_headers,
-        )
+        mock_response = MagicMock()
+        mock_response.status_code = 204
+        with patch("app.api.webhooks.httpx.Client") as mock_httpx:
+            mock_httpx.return_value.__enter__ = MagicMock(return_value=MagicMock(post=MagicMock(return_value=mock_response)))
+            mock_httpx.return_value.__exit__ = MagicMock(return_value=False)
+            resp = test_client.post(
+                f"/api/webhooks/{test_webhook.id}/test",
+                headers=auth_headers,
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
