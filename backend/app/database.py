@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import QueuePool, StaticPool
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -14,13 +14,13 @@ DATABASE_URL = os.getenv(
 )
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
+_use_static_pool = os.getenv("SQLALCHEMY_STATIC_POOL", "").lower() == "true"
 
 _engine_kwargs: dict = {}
 if _is_sqlite:
-    _engine_kwargs.update(
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+    if _use_static_pool:
+        _engine_kwargs["poolclass"] = StaticPool
 
     # --- SQLite ARRAY adapter (same as tests/conftest.py) ---
     @compiles(ARRAY, "sqlite")
