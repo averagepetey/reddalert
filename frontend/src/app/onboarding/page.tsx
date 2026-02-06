@@ -33,15 +33,7 @@ function OnboardingContent() {
   const [discordConnected, setDiscordConnected] = useState(false);
   const [discordAvailable, setDiscordAvailable] = useState(true);
 
-  // Step 2: Subreddits
-  const [subredditName, setSubredditName] = useState("");
-  const [subreddits, setSubreddits] = useState<string[]>([]);
-
-  // Step 3: Keywords
-  const [phrases, setPhrases] = useState<string[]>([]);
-  const [exclusions, setExclusions] = useState<string[]>([]);
-
-  // Check if returning from Discord OAuth
+  // Check if returning from Discord OAuth (fallback for non-popup)
   useEffect(() => {
     if (searchParams.get("discord") === "success") {
       getWebhooks()
@@ -54,11 +46,17 @@ function OnboardingContent() {
             setDiscordConnected(true);
           }
         })
-        .catch(() => {
-          // Silently fail - user can still use manual flow
-        });
+        .catch(() => {});
     }
   }, [searchParams]);
+
+  // Step 2: Subreddits
+  const [subredditName, setSubredditName] = useState("");
+  const [subreddits, setSubreddits] = useState<string[]>([]);
+
+  // Step 3: Keywords
+  const [phrases, setPhrases] = useState<string[]>([]);
+  const [exclusions, setExclusions] = useState<string[]>([]);
 
   async function handleConnectDiscord() {
     setLoading(true);
@@ -66,7 +64,32 @@ function OnboardingContent() {
     try {
       const { auth_url, state } = await getDiscordAuthUrl();
       localStorage.setItem("discord_oauth_state", state);
-      window.location.href = auth_url;
+      const popup = window.open(auth_url, "discord_oauth", "width=500,height=800");
+
+      // Poll for completion — callback page sets localStorage flag
+      const poll = setInterval(() => {
+        const result = localStorage.getItem("discord_oauth_result");
+        if (result || !popup || popup.closed) {
+          clearInterval(poll);
+          localStorage.removeItem("discord_oauth_result");
+          if (result === "success") {
+            getWebhooks()
+              .then((webhooks) => {
+                const primary = webhooks.find((w) => w.is_primary) || webhooks[0];
+                if (primary) {
+                  setWebhookUrl(primary.url);
+                  setWebhookId(primary.id);
+                  setWebhookTested(true);
+                  setDiscordConnected(true);
+                }
+              })
+              .catch(() => {});
+          } else if (result === "error") {
+            setError("Discord connection failed. Try again or paste manually.");
+          }
+          setLoading(false);
+        }
+      }, 500);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "";
       if (message.includes("503") || message.includes("not configured")) {
@@ -74,7 +97,6 @@ function OnboardingContent() {
       } else {
         setError("Failed to start Discord connection. Try pasting manually.");
       }
-    } finally {
       setLoading(false);
     }
   }

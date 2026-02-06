@@ -28,10 +28,21 @@ function CallbackHandler() {
     sendDiscordGuild(guild_id, permissions || "", state)
       .then(() => {
         localStorage.removeItem("discord_oauth_state");
-        router.replace("/onboarding?discord=success");
+        localStorage.setItem("discord_oauth_result", "success");
+        // If opened as popup, close it; otherwise redirect
+        if (window.opener) {
+          window.close();
+        } else {
+          router.replace("/onboarding?discord=success");
+        }
       })
       .catch(() => {
-        setError("Failed to connect Discord. Please try again.");
+        localStorage.setItem("discord_oauth_result", "error");
+        if (window.opener) {
+          window.close();
+        } else {
+          setError("Failed to connect Discord. Please try again.");
+        }
       });
   }, [searchParams, router]);
 

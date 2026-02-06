@@ -45,18 +45,26 @@ def _create_private_channel(
 ) -> dict:
     """Create a private #reddalert-alerts channel in the guild.
 
-    The channel denies VIEW_CHANNEL (1024) for @everyone (role id = guild_id).
-    Only users with ADMINISTRATOR permission can see it.
+    The channel denies VIEW_CHANNEL for @everyone so only admins can see it.
+    The bot is explicitly granted access so it can manage the channel.
     """
+    # VIEW_CHANNEL (1024) | SEND_MESSAGES (2048) | MANAGE_WEBHOOKS (536870912)
+    bot_allow = str(1024 | 2048 | 536870912)
+
     payload = {
         "name": "reddalert-alerts",
         "type": 0,  # text channel
         "permission_overwrites": [
             {
                 "id": guild_id,
-                "type": 0,  # role
+                "type": 0,  # role (@everyone)
                 "deny": "1024",  # VIEW_CHANNEL
-            }
+            },
+            {
+                "id": DISCORD_CLIENT_ID,
+                "type": 1,  # member (bot user)
+                "allow": bot_allow,
+            },
         ],
     }
 
