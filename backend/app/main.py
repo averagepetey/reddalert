@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from .api import (
     auth_router,
     clients_router,
+    discord_router,
     keywords_router,
     matches_router,
     stats_router,
@@ -54,6 +55,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(clients_router)
+app.include_router(discord_router)
 app.include_router(keywords_router)
 app.include_router(subreddits_router)
 app.include_router(webhooks_router)

@@ -1,16 +1,25 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import StepIndicator from "@/components/StepIndicator";
 import ChipInput from "@/components/ChipInput";
-import { addWebhook, testWebhook, deleteWebhook, addSubreddit, createKeyword } from "@/lib/api";
+import {
+  addWebhook,
+  testWebhook,
+  deleteWebhook,
+  addSubreddit,
+  createKeyword,
+  getDiscordAuthUrl,
+  getWebhooks,
+} from "@/lib/api";
 
 const STEPS = ["Webhook", "Subreddits", "Keywords", "Confirm"];
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,6 +29,10 @@ export default function OnboardingPage() {
   const [webhookTested, setWebhookTested] = useState(false);
   const [webhookId, setWebhookId] = useState<string | null>(null);
 
+  // Discord OAuth state
+  const [discordConnected, setDiscordConnected] = useState(false);
+  const [discordAvailable, setDiscordAvailable] = useState(true);
+
   // Step 2: Subreddits
   const [subredditName, setSubredditName] = useState("");
   const [subreddits, setSubreddits] = useState<string[]>([]);
@@ -27,6 +40,44 @@ export default function OnboardingPage() {
   // Step 3: Keywords
   const [phrases, setPhrases] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
+
+  // Check if returning from Discord OAuth
+  useEffect(() => {
+    if (searchParams.get("discord") === "success") {
+      getWebhooks()
+        .then((webhooks) => {
+          const primary = webhooks.find((w) => w.is_primary) || webhooks[0];
+          if (primary) {
+            setWebhookUrl(primary.url);
+            setWebhookId(primary.id);
+            setWebhookTested(true);
+            setDiscordConnected(true);
+          }
+        })
+        .catch(() => {
+          // Silently fail - user can still use manual flow
+        });
+    }
+  }, [searchParams]);
+
+  async function handleConnectDiscord() {
+    setLoading(true);
+    setError("");
+    try {
+      const { auth_url, state } = await getDiscordAuthUrl();
+      localStorage.setItem("discord_oauth_state", state);
+      window.location.href = auth_url;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      if (message.includes("503") || message.includes("not configured")) {
+        setDiscordAvailable(false);
+      } else {
+        setError("Failed to start Discord connection. Try pasting manually.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleTestWebhook() {
     setLoading(true);
@@ -95,30 +146,64 @@ export default function OnboardingPage() {
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">Add Discord Webhook</h2>
               <p className="text-sm text-neutral-400">
-                Paste your Discord webhook URL. We will send a test message to verify it works.
+                Connect your Discord server or paste a webhook URL manually.
               </p>
-              <input
-                type="url"
-                value={webhookUrl}
-                onChange={(e) => {
-                  setWebhookUrl(e.target.value);
-                  setWebhookTested(false);
-                }}
-                placeholder="https://discord.com/api/webhooks/..."
-                className="block w-full rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-white placeholder:text-neutral-500 focus:border-blue-500 focus:outline-none"
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleTestWebhook}
-                  disabled={loading || !webhookUrl.trim()}
-                  className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
-                >
-                  {loading ? "Testing..." : "Test Webhook"}
-                </button>
-                {webhookTested && (
-                  <span className="text-sm text-green-400">Webhook verified!</span>
-                )}
-              </div>
+
+              {discordConnected ? (
+                <div className="rounded-lg border border-green-700 bg-green-900/30 px-4 py-3">
+                  <p className="text-sm font-medium text-green-400">
+                    Discord webhook connected!
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-400 truncate">
+                    {webhookUrl}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {discordAvailable && (
+                    <>
+                      <button
+                        onClick={handleConnectDiscord}
+                        disabled={loading}
+                        className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                        style={{ backgroundColor: "#5865F2" }}
+                      >
+                        {loading ? "Connecting..." : "Connect to Discord"}
+                      </button>
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 border-t border-neutral-700" />
+                        <span className="text-xs text-neutral-500">or paste manually</span>
+                        <div className="flex-1 border-t border-neutral-700" />
+                      </div>
+                    </>
+                  )}
+
+                  <input
+                    type="url"
+                    value={webhookUrl}
+                    onChange={(e) => {
+                      setWebhookUrl(e.target.value);
+                      setWebhookTested(false);
+                    }}
+                    placeholder="https://discord.com/api/webhooks/..."
+                    className="block w-full rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-white placeholder:text-neutral-500 focus:border-blue-500 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleTestWebhook}
+                      disabled={loading || !webhookUrl.trim()}
+                      className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+                    >
+                      {loading ? "Testing..." : "Test Webhook"}
+                    </button>
+                    {webhookTested && (
+                      <span className="text-sm text-green-400">Webhook verified!</span>
+                    )}
+                  </div>
+                </>
+              )}
+
               <div className="pt-4">
                 <button
                   onClick={() => setStep(1)}
@@ -279,5 +364,13 @@ export default function OnboardingPage() {
         </div>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-2xl mt-10 text-center text-neutral-400">Loading...</div>}>
+      <OnboardingContent />
+    </Suspense>
   );
 }

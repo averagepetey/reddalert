@@ -153,6 +153,24 @@ export function deleteWebhook(id: string) {
   return apiFetch<void>(`/webhooks/${id}`, { method: "DELETE" });
 }
 
+// --- Discord OAuth ---
+
+export interface DiscordAuthUrl {
+  auth_url: string;
+  state: string;
+}
+
+export function getDiscordAuthUrl(): Promise<DiscordAuthUrl> {
+  return apiFetch<DiscordAuthUrl>("/discord/auth-url");
+}
+
+export function exchangeDiscordCode(code: string, state: string): Promise<Webhook> {
+  return apiFetch<Webhook>("/discord/callback", {
+    method: "POST",
+    body: JSON.stringify({ code, state }),
+  });
+}
+
 // --- Matches ---
 
 export interface Match {

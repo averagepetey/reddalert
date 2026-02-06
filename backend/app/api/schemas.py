@@ -225,6 +225,26 @@ class SubredditResponse(BaseModel):
     created_at: datetime
 
 
+# --- Discord OAuth schemas ---
+
+class DiscordAuthUrlResponse(BaseModel):
+    auth_url: str
+    state: str
+
+
+class DiscordCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+    @field_validator("code")
+    @classmethod
+    def code_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Authorization code must not be empty")
+        return v
+
+
 # --- Webhook schemas ---
 
 class WebhookCreate(BaseModel):
