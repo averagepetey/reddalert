@@ -41,9 +41,16 @@ class RedditPoller:
     @staticmethod
     def _create_reddit_client() -> Reddit:
         """Create a PRAW Reddit client from environment variables."""
+        client_id = os.environ.get("REDDIT_CLIENT_ID")
+        client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise RuntimeError(
+                "REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET must be set. "
+                "Create a 'script' app at https://www.reddit.com/prefs/apps"
+            )
         return Reddit(
-            client_id=os.environ["REDDIT_CLIENT_ID"],
-            client_secret=os.environ["REDDIT_CLIENT_SECRET"],
+            client_id=client_id,
+            client_secret=client_secret,
             user_agent=os.environ.get("REDDIT_USER_AGENT", "reddalert/1.0"),
         )
 

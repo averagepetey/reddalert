@@ -22,7 +22,6 @@ from app.services.matcher import KeywordConfig
 def _make_client(**overrides):
     defaults = {
         "id": uuid.uuid4(),
-        "api_key": "test-key",
         "email": "test@example.com",
         "polling_interval": 60,
         "created_at": datetime.now(timezone.utc),

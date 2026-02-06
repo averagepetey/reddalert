@@ -115,6 +115,12 @@ class TestRedditPollerInit:
         assert poller.db is db
         assert poller.reddit is reddit
 
+    @patch.dict("os.environ", {}, clear=True)
+    def test_raises_on_missing_credentials(self):
+        db = MagicMock()
+        with pytest.raises(RuntimeError, match="REDDIT_CLIENT_ID"):
+            RedditPoller(db)
+
     @patch.dict(
         "os.environ",
         {

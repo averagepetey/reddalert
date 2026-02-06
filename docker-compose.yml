@@ -13,41 +13,45 @@ services:
     #   - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reddalert"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   backend:
     build: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
     depends_on:
-      - db
-    volumes:
-      - ./backend:/app
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
   worker:
     build: ./backend
-    command: python -m app.worker.main
+    command: sh -c "alembic upgrade head && python -m app.worker.main"
     env_file:
       - ./backend/.env
     depends_on:
-      - db
-    volumes:
-      - ./backend:/app
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
-    build: ./frontend
-    command: npm run dev
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8000}"
     ports:
       - "3000:3000"
-    env_file:
-      - ./frontend/.env
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    restart: unless-stopped
 
 volumes:
   pgdata:
