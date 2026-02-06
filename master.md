@@ -332,3 +332,167 @@ Shared Reddit Poller
 8. REST API — FastAPI endpoints
 9. Background worker — Scheduled polling + matching
 10. Frontend — Next.js dashboard with wizard
+
+---
+
+## Build Status
+
+**All 3 phases complete. 225 tests passing, 0 failures.**
+
+### Phase 1 — Foundation (67 tests)
+
+| Component | File | Tests |
+|-----------|------|-------|
+| Text normalizer | `backend/app/services/normalizer.py` | 26 |
+| Proximity matcher | `backend/app/services/matcher.py` | 32 |
+| Deduplicator | `backend/app/services/deduplicator.py` | 9 |
+| DB models (6 tables) | `backend/app/models/` | — |
+| Alembic migration | `backend/alembic/versions/001_initial_schema.py` | — |
+| Project scaffolding | `.gitignore`, `docker-compose.yml`, Dockerfiles, configs | — |
+
+### Phase 2 — Core Engine (52 tests)
+
+| Component | File | Tests |
+|-----------|------|-------|
+| Reddit poller | `backend/app/services/poller.py` | 14 |
+| Match engine | `backend/app/services/match_engine.py` | 8 |
+| Alert dispatcher | `backend/app/services/alert_dispatcher.py` | 17 |
+| Match engine | `backend/app/services/match_engine.py` | 8 |
+
+### Phase 3 — API + Worker + Frontend + Security (106 tests)
+
+| Component | File | Tests |
+|-----------|------|-------|
+| REST API (22 routes) | `backend/app/api/` | 47 |
+| Security hardening | `backend/app/api/security.py`, `backend/app/api/auth.py` | 38 |
+| Background worker | `backend/app/worker/` | 14 |
+| Next.js frontend | `frontend/src/` | — |
+
+---
+
+## File Map
+
+### Backend — `backend/`
+
+```
+backend/
+├── app/
+│   ├── api/
+│   │   ├── __init__.py          # Router exports
+│   │   ├── auth.py              # API key auth, PBKDF2-SHA256 hashing, rate limiter
+│   │   ├── clients.py           # POST /api/clients, GET/PATCH /api/clients/me
+│   │   ├── keywords.py          # CRUD /api/keywords (soft delete)
+│   │   ├── subreddits.py        # CRUD /api/subreddits (duplicate detection)
+│   │   ├── webhooks.py          # CRUD /api/webhooks + POST test
+│   │   ├── matches.py           # GET /api/matches (paginated + filters)
+│   │   ├── stats.py             # GET /api/stats (analytics)
+│   │   ├── schemas.py           # Pydantic v2 request/response models + validators
+│   │   └── security.py          # Security utilities (SSRF prevention, input sanitization)
+│   ├── models/
+│   │   ├── base.py              # DeclarativeBase, UUID mixin, timestamp mixin
+│   │   ├── clients.py           # Client model
+│   │   ├── keywords.py          # Keyword model (ARRAY phrases/exclusions)
+│   │   ├── subreddits.py        # MonitoredSubreddit model
+│   │   ├── webhooks.py          # WebhookConfig model
+│   │   ├── content.py           # RedditContent model
+│   │   └── matches.py           # Match model (AlertStatus enum)
+│   ├── services/
+│   │   ├── normalizer.py        # Text normalization (URLs, markdown, whitespace)
+│   │   ├── matcher.py           # Proximity matching (OR groups, negations, stemming)
+│   │   ├── poller.py            # Reddit polling via PRAW
+│   │   ├── deduplicator.py      # SHA256 content hashing + duplicate check
+│   │   ├── match_engine.py      # Multi-client fan-out matching
+│   │   └── alert_dispatcher.py  # Discord webhook dispatch + batching + retry
+│   ├── worker/
+│   │   ├── main.py              # APScheduler entry point
+│   │   ├── pipeline.py          # Poll → Match → Alert pipeline
+│   │   └── retention.py         # 90-day data cleanup
+│   ├── database.py              # SQLAlchemy engine + session factory
+│   └── main.py                  # FastAPI app (CORS, routers, error handler)
+├── tests/
+│   ├── conftest.py              # Shared SQLite ARRAY adapter
+│   ├── test_normalizer.py       # 26 tests
+│   ├── test_matcher.py          # 32 tests
+│   ├── test_deduplicator.py     # 9 tests
+│   ├── test_poller.py           # 14 tests
+│   ├── test_match_engine.py     # 8 tests
+│   ├── test_alert_dispatcher.py # 17 tests
+│   ├── test_api.py              # 47 tests (all endpoints + auth + isolation)
+│   ├── test_security.py         # 38 tests (hashing, validation, SSRF, CORS, rate limiting)
+│   └── test_worker.py           # 14 tests
+├── alembic/                     # Database migrations
+├── requirements.txt
+├── pyproject.toml
+└── Dockerfile
+```
+
+### Frontend — `frontend/`
+
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx             # Landing / login page
+│   │   ├── layout.tsx           # Root layout with Navbar
+│   │   ├── globals.css          # Tailwind base styles
+│   │   ├── dashboard/page.tsx   # Stats dashboard (match counts, top keywords/subs)
+│   │   ├── onboarding/page.tsx  # 3-step wizard (webhook → subreddits → keywords)
+│   │   ├── keywords/page.tsx    # Keyword CRUD (phrases, exclusions, proximity config)
+│   │   ├── subreddits/page.tsx  # Subreddit manager (add/remove, status badges)
+│   │   ├── webhooks/page.tsx    # Webhook manager (add, test, set primary)
+│   │   ├── matches/page.tsx     # Match feed with filtering + pagination
+│   │   └── settings/page.tsx    # Client settings (polling interval, email)
+│   ├── components/
+│   │   ├── Navbar.tsx           # Navigation bar with active link highlighting
+│   │   ├── AuthGuard.tsx        # Redirects unauthenticated users to login
+│   │   ├── ChipInput.tsx        # Enter-to-add tag input for phrases
+│   │   ├── StatusBadge.tsx      # Color-coded status indicators
+│   │   ├── MatchCard.tsx        # Match display card with snippet + metadata
+│   │   ├── StatCard.tsx         # Metric card for dashboard
+│   │   ├── StepIndicator.tsx    # Progress steps for onboarding wizard
+│   │   └── EmptyState.tsx       # Placeholder for empty lists
+│   └── lib/
+│       ├── api.ts               # API client (apiFetch, typed endpoints)
+│       └── auth.ts              # localStorage API key management
+├── package.json
+├── tailwind.config.ts
+├── tsconfig.json
+└── Dockerfile
+```
+
+### API Routes (22 total)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/api/clients` | No | Create client, returns plaintext API key |
+| GET | `/api/clients/me` | Yes | Get current client info |
+| PATCH | `/api/clients/me` | Yes | Update email / polling interval |
+| GET | `/api/keywords` | Yes | List active keywords |
+| POST | `/api/keywords` | Yes | Create keyword (phrases, exclusions, proximity) |
+| GET | `/api/keywords/{id}` | Yes | Get single keyword |
+| PATCH | `/api/keywords/{id}` | Yes | Update keyword fields |
+| DELETE | `/api/keywords/{id}` | Yes | Soft-delete keyword |
+| GET | `/api/subreddits` | Yes | List monitored subreddits |
+| POST | `/api/subreddits` | Yes | Add subreddit (duplicate check, r/ strip) |
+| PATCH | `/api/subreddits/{id}` | Yes | Update subreddit settings |
+| DELETE | `/api/subreddits/{id}` | Yes | Stop monitoring subreddit |
+| GET | `/api/webhooks` | Yes | List webhooks |
+| POST | `/api/webhooks` | Yes | Add Discord webhook (SSRF validated) |
+| PATCH | `/api/webhooks/{id}` | Yes | Update webhook (set primary) |
+| DELETE | `/api/webhooks/{id}` | Yes | Remove webhook |
+| POST | `/api/webhooks/{id}/test` | Yes | Test webhook delivery |
+| GET | `/api/matches` | Yes | List matches (paginated, filterable) |
+| GET | `/api/matches/{id}` | Yes | Get single match detail |
+| GET | `/api/stats` | Yes | Dashboard analytics |
+| GET | `/health` | No | Health check |
+
+### Security Features
+
+- **API key hashing**: PBKDF2-SHA256 with random salt (timing-attack resistant)
+- **Rate limiting**: 100 requests/min per API key prefix, returns `X-RateLimit-*` headers
+- **CORS lockdown**: Only allows `http://localhost:3000` (configurable via `CORS_ORIGINS` env)
+- **SSRF prevention**: Webhook URLs must match Discord webhook pattern only
+- **Input validation**: Subreddit name regex, phrase length limits, angle bracket sanitization
+- **Client isolation**: All queries filter by `client_id`, tested with cross-client assertions
+- **Error safety**: Global exception handler prevents stack trace / path leakage
+- **No plaintext secrets**: API keys hashed before storage, only shown once on creation
