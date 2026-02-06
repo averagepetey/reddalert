@@ -60,6 +60,7 @@
 | Feature               | Behavior                                          |
 |-----------------------|---------------------------------------------------|
 | Onboarding            | Linear wizard                                     |
+| Webhook setup         | "Connect to Discord" OAuth2 or manual URL paste    |
 | Min setup             | 1 webhook + 1 subreddit + 1 keyword               |
 | Subreddit suggestions | Keyword-based recommendations                     |
 | Partial config        | Allowed with status indicator                     |
@@ -144,6 +145,7 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 ```
 
 - CRUD for keywords, subreddits, webhooks
+- Discord OAuth2 webhook setup (webhook.incoming scope)
 - Match history retrieval
 - Client configuration
 - Basic analytics
@@ -210,6 +212,8 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
   - `GET/PATCH /clients/me` — view/update client settings
   - `GET/POST/DELETE /keywords` — manage keyword phrases
   - `GET/POST/DELETE /subreddits` — manage monitored subs
+  - `GET /discord/auth-url` — Discord OAuth2 authorization URL
+  - `POST /discord/callback` — exchange Discord code for webhook
   - `GET/POST /webhooks` — manage Discord webhooks
   - `GET /matches` — retrieve match history
   - `GET /stats` — basic analytics
@@ -217,7 +221,7 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 
 ### 7. Next.js Dashboard
 
-- Onboarding wizard: Webhook → Subreddits → Keywords → Done
+- Onboarding wizard: Webhook (Discord OAuth2 or manual paste) → Subreddits → Keywords → Done
 - Keyword manager: Add phrases with enter-to-add UI, exclusions, proximity config
 - Subreddit manager: Add subs, see suggestions based on keywords, status indicators
 - Match feed: Recent matches with filtering
@@ -339,7 +343,7 @@ Shared Reddit Poller
 
 ## Build Status
 
-**All 3 phases complete. 225 tests passing, 0 failures.**
+**All 3 phases + Discord OAuth2 complete. 241 tests passing, 0 failures.**
 
 ### Phase 1 — Foundation (67 tests)
 
@@ -365,10 +369,18 @@ Shared Reddit Poller
 
 | Component | File | Tests |
 |-----------|------|-------|
-| REST API (22 routes) | `backend/app/api/` | 47 |
+| REST API (24 routes) | `backend/app/api/` | 47 |
 | Security hardening | `backend/app/api/security.py`, `backend/app/api/auth.py` | 38 |
 | Background worker | `backend/app/worker/` | 14 |
 | Next.js frontend | `frontend/src/` | — |
+
+### Discord OAuth2 Integration (9 tests)
+
+| Component | File | Tests |
+|-----------|------|-------|
+| Discord OAuth2 endpoints | `backend/app/api/discord.py` | 9 |
+| Discord callback page | `frontend/src/app/discord/callback/page.tsx` | — |
+| Onboarding "Connect to Discord" | `frontend/src/app/onboarding/page.tsx` | — |
 
 ---
 
@@ -383,6 +395,7 @@ backend/
 │   │   ├── __init__.py          # Router exports
 │   │   ├── auth.py              # JWT auth, PBKDF2-SHA256 password hashing, Bearer token validation
 │   │   ├── clients.py           # POST /api/auth/register, POST /api/auth/login, GET/PATCH /api/clients/me
+│   │   ├── discord.py           # GET /api/discord/auth-url, POST /api/discord/callback (OAuth2 webhook setup)
 │   │   ├── keywords.py          # CRUD /api/keywords (soft delete)
 │   │   ├── subreddits.py        # CRUD /api/subreddits (duplicate detection)
 │   │   ├── webhooks.py          # CRUD /api/webhooks + POST test
@@ -420,6 +433,7 @@ backend/
 │   ├── test_match_engine.py     # 8 tests
 │   ├── test_alert_dispatcher.py # 17 tests
 │   ├── test_api.py              # 47 tests (all endpoints + auth + isolation)
+│   ├── test_discord.py          # 9 tests (OAuth2 auth-url + callback)
 │   ├── test_security.py         # 30 tests (password hashing, JWT auth, validation, SSRF, CORS)
 │   └── test_worker.py           # 14 tests
 ├── alembic/                     # Database migrations
@@ -438,7 +452,8 @@ frontend/
 │   │   ├── layout.tsx           # Root layout with Navbar
 │   │   ├── globals.css          # Tailwind base styles
 │   │   ├── dashboard/page.tsx   # Stats dashboard (match counts, top keywords/subs)
-│   │   ├── onboarding/page.tsx  # 3-step wizard (webhook → subreddits → keywords)
+│   │   ├── onboarding/page.tsx  # 4-step wizard (webhook via Discord OAuth2 or manual → subreddits → keywords → confirm)
+│   │   ├── discord/callback/page.tsx  # Discord OAuth2 redirect handler
 │   │   ├── keywords/page.tsx    # Keyword CRUD (phrases, exclusions, proximity config)
 │   │   ├── subreddits/page.tsx  # Subreddit manager (add/remove, status badges)
 │   │   ├── webhooks/page.tsx    # Webhook manager (add, test, set primary)
@@ -462,7 +477,7 @@ frontend/
 └── Dockerfile
 ```
 
-### API Routes (22 total)
+### API Routes (24 total)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -479,6 +494,8 @@ frontend/
 | POST | `/api/subreddits` | Yes | Add subreddit (duplicate check, r/ strip) |
 | PATCH | `/api/subreddits/{id}` | Yes | Update subreddit settings |
 | DELETE | `/api/subreddits/{id}` | Yes | Stop monitoring subreddit |
+| GET | `/api/discord/auth-url` | Yes | Get Discord OAuth2 authorization URL + CSRF state |
+| POST | `/api/discord/callback` | Yes | Exchange Discord auth code for webhook, save to DB |
 | GET | `/api/webhooks` | Yes | List webhooks |
 | POST | `/api/webhooks` | Yes | Add Discord webhook (SSRF validated) |
 | PATCH | `/api/webhooks/{id}` | Yes | Update webhook (set primary) |
