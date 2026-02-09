@@ -363,3 +363,11 @@ class StatsResponse(BaseModel):
     matches_last_7d: int
     top_keywords: List[KeywordStat]
     top_subreddits: List[SubredditStat]
+
+
+# --- Subreddit search schemas ---
+
+class SubredditSuggestion(BaseModel):
+    name: str
+    subscribers: int
+    description: str

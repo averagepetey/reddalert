@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import StatusBadge from "@/components/StatusBadge";
 import EmptyState from "@/components/EmptyState";
@@ -9,7 +9,9 @@ import {
   addSubreddit,
   updateSubreddit,
   deleteSubreddit,
+  searchSubreddits,
   type Subreddit,
+  type SubredditSuggestion,
 } from "@/lib/api";
 
 export default function SubredditsPage() {
@@ -21,6 +23,27 @@ export default function SubredditsPage() {
   const [dedupeCross, setDedupeCross] = useState(true);
   const [filterBots, setFilterBots] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<SubredditSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchSuggestions = useCallback((query: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (query.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const results = await searchSubreddits(query);
+        setSuggestions(results);
+        setShowSuggestions(results.length > 0);
+      } catch {
+        setSuggestions([]);
+      }
+    }, 300);
+  }, []);
 
   useEffect(() => {
     loadSubs();
@@ -97,13 +120,51 @@ export default function SubredditsPage() {
         >
           <div>
             <label className="block text-sm text-neutral-300 mb-1">Subreddit name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. sportsbook"
-              className="block w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-white placeholder:text-neutral-500 focus:border-blue-500 focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  fetchSuggestions(e.target.value.replace(/^r\//, ""));
+                }}
+                onBlur={() => {
+                  setTimeout(() => setShowSuggestions(false), 200);
+                }}
+                onFocus={() => {
+                  if (suggestions.length > 0) setShowSuggestions(true);
+                }}
+                placeholder="e.g. sportsbook"
+                className="block w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-white placeholder:text-neutral-500 focus:border-blue-500 focus:outline-none"
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-900 shadow-lg max-h-60 overflow-y-auto">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.name}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setName(s.name);
+                        setSuggestions([]);
+                        setShowSuggestions(false);
+                      }}
+                      className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center justify-between"
+                    >
+                      <span className="text-sm text-white">r/{s.name}</span>
+                      <span className="text-xs text-neutral-500">
+                        {s.subscribers >= 1_000_000
+                          ? `${(s.subscribers / 1_000_000).toFixed(1)}M`
+                          : s.subscribers >= 1_000
+                          ? `${(s.subscribers / 1_000).toFixed(0)}K`
+                          : s.subscribers}{" "}
+                        members
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap gap-6">
             <label className="flex items-center gap-2 text-sm text-neutral-300">

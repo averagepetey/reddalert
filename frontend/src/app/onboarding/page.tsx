@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import StepIndicator from "@/components/StepIndicator";
@@ -15,6 +15,8 @@ import {
   getWebhooks,
   getSubreddits,
   getKeywords,
+  searchSubreddits,
+  type SubredditSuggestion,
 } from "@/lib/api";
 
 const STEPS = ["Webhook", "Subreddits", "Keywords", "Confirm"];
@@ -40,6 +42,28 @@ function OnboardingContent() {
   const [subredditName, setSubredditName] = useState("");
   const [subreddits, setSubreddits] = useState<string[]>([]);
   const [existingSubreddits, setExistingSubreddits] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<SubredditSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  const fetchSuggestions = useCallback((query: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (query.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const results = await searchSubreddits(query);
+        setSuggestions(results);
+        setShowSuggestions(results.length > 0);
+      } catch {
+        setSuggestions([]);
+      }
+    }, 300);
+  }, []);
 
   // Step 3: Keywords
   const [phrases, setPhrases] = useState<string[]>([]);
@@ -325,17 +349,72 @@ function OnboardingContent() {
                 </div>
               )}
 
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={subredditName}
-                  onChange={(e) => setSubredditName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddSubreddit())}
-                  placeholder="e.g. sportsbook"
-                  className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-white placeholder:text-neutral-500 focus:border-blue-500 focus:outline-none"
-                />
+              <div className="relative flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={subredditName}
+                    onChange={(e) => {
+                      setSubredditName(e.target.value);
+                      fetchSuggestions(e.target.value.replace(/^r\//, ""));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddSubreddit();
+                        setShowSuggestions(false);
+                      }
+                    }}
+                    onBlur={() => {
+                      // Delay to allow click on suggestion
+                      setTimeout(() => setShowSuggestions(false), 200);
+                    }}
+                    onFocus={() => {
+                      if (suggestions.length > 0) setShowSuggestions(true);
+                    }}
+                    placeholder="e.g. sportsbook"
+                    className="block w-full rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-white placeholder:text-neutral-500 focus:border-blue-500 focus:outline-none"
+                  />
+                  {showSuggestions && suggestions.length > 0 && (
+                    <div
+                      ref={suggestionsRef}
+                      className="absolute z-10 mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-900 shadow-lg max-h-60 overflow-y-auto"
+                    >
+                      {suggestions.map((s) => (
+                        <button
+                          key={s.name}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            const name = s.name.toLowerCase();
+                            if (!subreddits.includes(name) && !existingSubreddits.includes(name)) {
+                              setSubreddits([...subreddits, name]);
+                            }
+                            setSubredditName("");
+                            setSuggestions([]);
+                            setShowSuggestions(false);
+                          }}
+                          className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center justify-between"
+                        >
+                          <span className="text-sm text-white">r/{s.name}</span>
+                          <span className="text-xs text-neutral-500">
+                            {s.subscribers >= 1_000_000
+                              ? `${(s.subscribers / 1_000_000).toFixed(1)}M`
+                              : s.subscribers >= 1_000
+                              ? `${(s.subscribers / 1_000).toFixed(0)}K`
+                              : s.subscribers}{" "}
+                            members
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
-                  onClick={handleAddSubreddit}
+                  onClick={() => {
+                    handleAddSubreddit();
+                    setShowSuggestions(false);
+                  }}
                   className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-white hover:bg-neutral-700"
                 >
                   Add

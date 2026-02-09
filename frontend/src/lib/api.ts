@@ -117,6 +117,18 @@ export function deleteSubreddit(id: string) {
   return apiFetch<void>(`/subreddits/${id}`, { method: "DELETE" });
 }
 
+export interface SubredditSuggestion {
+  name: string;
+  subscribers: number;
+  description: string;
+}
+
+export function searchSubreddits(query: string) {
+  return apiFetch<SubredditSuggestion[]>(
+    `/subreddits/search?q=${encodeURIComponent(query)}`
+  );
+}
+
 // --- Webhooks ---
 
 export interface Webhook {

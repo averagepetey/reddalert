@@ -2,16 +2,41 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models.clients import Client
 from ..models.subreddits import MonitoredSubreddit
 from .auth import get_current_client
-from .schemas import SubredditCreate, SubredditResponse, SubredditUpdate
+from .schemas import SubredditCreate, SubredditResponse, SubredditSuggestion, SubredditUpdate
 
 router = APIRouter(prefix="/api/subreddits", tags=["subreddits"])
+
+
+@router.get("/search", response_model=list[SubredditSuggestion])
+async def search_subreddits(q: str = Query(min_length=2)):
+    """Search Reddit for subreddit suggestions (no auth required)."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(
+            "https://www.reddit.com/subreddits/search.json",
+            params={"q": q, "limit": 8, "raw_json": 1},
+            headers={"User-Agent": "Reddalert/0.1"},
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    children = data.get("data", {}).get("children", [])
+    return [
+        SubredditSuggestion(
+            name=child["data"].get("display_name", ""),
+            subscribers=child["data"].get("subscribers", 0) or 0,
+            description=(child["data"].get("public_description", "") or "")[:200],
+        )
+        for child in children
+        if child.get("data")
+    ]
 
 
 @router.get("", response_model=list[SubredditResponse])
