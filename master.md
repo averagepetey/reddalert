@@ -359,7 +359,7 @@ Shared Reddit Poller
 | Alembic migration | `backend/alembic/versions/001_initial_schema.py` | — |
 | Project scaffolding | `.gitignore`, `docker-compose.yml`, Dockerfiles, configs | — |
 
-### Phase 2 — Core Engine (52 tests)
+### Phase 2 — Core Engine (53 tests)
 
 | Component | File | Tests |
 |-----------|------|-------|
