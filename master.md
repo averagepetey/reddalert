@@ -22,7 +22,7 @@
 | Comment depth         | Top-level only                 |
 | Snippet length        | 200 characters                 |
 | Data retention        | 90 days                        |
-| Reddit auth           | Shared app default, BYOC option |
+| Reddit data source    | Public JSON endpoints (no API credentials) |
 
 ## Matching Logic
 
@@ -95,15 +95,17 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 ```
 ┌──────────┐      ┌──────────────┐      ┌─────────────┐
 │ Reddit   │ ──── │ Poller       │ ──── │ Raw Content │
-│ API      │      │ (hourly/     │      │ Store       │
-│          │      │  configurable)│      │ (PostgreSQL)│
+│ JSON     │      │ (hourly/     │      │ Store       │
+│ endpoints│      │  configurable)│      │ (PostgreSQL)│
 └──────────┘      └──────────────┘      └─────────────┘
 ```
 
-- Polls each monitored subreddit
-- Fetches new posts + top-level comments
+- Polls each monitored subreddit via public JSON endpoints (no API credentials)
+- Makes 2 requests per subreddit: `/r/{sub}/new.json` (posts) + `/r/{sub}/comments.json` (comments)
+- Fetches new posts + top-level comments (filtered by `parent_id` prefix `t3_`)
 - Deduplicates by content hash
 - Stores normalized text
+- Rate-limit-friendly: 1-second delay between requests per subreddit
 
 ### 2. MATCHING (Background Worker)
 
@@ -156,9 +158,10 @@ Reddalert is a Reddit monitoring service that helps Discord-based businesses dis
 
 ### 1. Reddit Poller
 
-- Connects to Reddit API via PRAW library
-- Maintains last_seen_id per subreddit to only fetch new content
-- Respects rate limits (100 requests/min)
+- Fetches data via Reddit's public JSON endpoints using httpx (no API credentials required)
+- Two requests per subreddit: `/r/{sub}/new.json` for posts, `/r/{sub}/comments.json` for top-level comments
+- Filters comments to top-level only (`parent_id` starts with `t3_`)
+- 1-second delay between requests to respect rate limits
 - Runs on configurable interval (default hourly, can be faster)
 - Shared polling — one poll serves all clients monitoring that subreddit
 
@@ -331,7 +334,7 @@ Shared Reddit Poller
 1. Data models — SQLAlchemy models, migrations
 2. Text normalizer — Standalone module with tests
 3. Proximity matcher — Standalone module with tests
-4. Reddit poller — PRAW integration, content storage
+4. Reddit poller — Public JSON endpoints via httpx, content storage
 5. Deduplicator — Hash-based skip logic
 6. Match engine — Connect content to keywords
 7. Alert dispatcher — Discord webhook sender
@@ -343,7 +346,7 @@ Shared Reddit Poller
 
 ## Build Status
 
-**All 3 phases + Discord bot integration complete. 243 tests passing, 0 failures.**
+**All 3 phases + Discord bot integration complete. 244 tests passing, 0 failures.**
 
 ### Phase 1 — Foundation (67 tests)
 
@@ -360,7 +363,7 @@ Shared Reddit Poller
 
 | Component | File | Tests |
 |-----------|------|-------|
-| Reddit poller | `backend/app/services/poller.py` | 14 |
+| Reddit poller | `backend/app/services/poller.py` | 15 |
 | Match engine | `backend/app/services/match_engine.py` | 8 |
 | Alert dispatcher | `backend/app/services/alert_dispatcher.py` | 17 |
 | Match engine | `backend/app/services/match_engine.py` | 8 |
@@ -421,7 +424,7 @@ backend/
 │   ├── services/
 │   │   ├── normalizer.py        # Text normalization (URLs, markdown, whitespace)
 │   │   ├── matcher.py           # Proximity matching (OR groups, negations, stemming)
-│   │   ├── poller.py            # Reddit polling via PRAW
+│   │   ├── poller.py            # Reddit polling via public JSON endpoints (httpx)
 │   │   ├── deduplicator.py      # SHA256 content hashing + duplicate check
 │   │   ├── match_engine.py      # Multi-client fan-out matching
 │   │   └── alert_dispatcher.py  # Discord webhook dispatch + batching + retry
@@ -436,7 +439,7 @@ backend/
 │   ├── test_normalizer.py       # 26 tests
 │   ├── test_matcher.py          # 32 tests
 │   ├── test_deduplicator.py     # 9 tests
-│   ├── test_poller.py           # 14 tests
+│   ├── test_poller.py           # 15 tests
 │   ├── test_match_engine.py     # 8 tests
 │   ├── test_alert_dispatcher.py # 17 tests
 │   ├── test_api.py              # 47 tests (all endpoints + auth + isolation)

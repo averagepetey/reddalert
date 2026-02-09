@@ -217,8 +217,8 @@ def test_get_auth_url_returns_url_and_state(test_client, auth_header):
     assert "test-client-id-123" in data["auth_url"]
     assert "scope=bot" in data["auth_url"]
     assert "permissions=536870928" in data["auth_url"]
-    # Bot flow should NOT have response_type
-    assert "response_type" not in data["auth_url"]
+    # response_type=code needed to trigger Discord redirect
+    assert "response_type=code" in data["auth_url"]
     assert "discord.com" in data["auth_url"]
     assert len(data["state"]) > 0
 

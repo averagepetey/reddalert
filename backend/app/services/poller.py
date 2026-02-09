@@ -2,17 +2,17 @@ from __future__ import annotations
 
 """Reddit polling service for Reddalert.
 
-Connects to the Reddit API via PRAW, fetches new posts and top-level comments
-from monitored subreddits, normalizes content, deduplicates, and persists
-RedditContent records.
+Fetches new posts and top-level comments from monitored subreddits using
+Reddit's public JSON endpoints (no API credentials required), normalizes
+content, deduplicates, and persists RedditContent records.
 """
 
 import logging
-import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from praw import Reddit
+import httpx
 from sqlalchemy import distinct
 from sqlalchemy.orm import Session
 
@@ -23,35 +23,35 @@ from .normalizer import normalize_text
 
 logger = logging.getLogger(__name__)
 
+REDDIT_BASE_URL = "https://www.reddit.com"
+DEFAULT_USER_AGENT = "reddalert/1.0"
+# Small delay between the posts and comments requests to stay under rate limits.
+REQUEST_DELAY = 1.0
+
 
 class RedditPoller:
     """Polls Reddit for new posts and comments, storing them as RedditContent."""
 
-    def __init__(self, db_session: Session, reddit_client: Optional[Reddit] = None):
+    def __init__(
+        self, db_session: Session, http_client: Optional[httpx.Client] = None
+    ):
         """Initialize the poller.
 
         Args:
             db_session: Active SQLAlchemy session.
-            reddit_client: Optional pre-configured PRAW Reddit instance.
-                           If not provided, one is created from environment variables.
+            http_client: Optional pre-configured httpx.Client.
+                         If not provided, one is created with a default User-Agent.
         """
         self.db = db_session
-        self.reddit = reddit_client or self._create_reddit_client()
+        self.http = http_client or self._create_http_client()
 
     @staticmethod
-    def _create_reddit_client() -> Reddit:
-        """Create a PRAW Reddit client from environment variables."""
-        client_id = os.environ.get("REDDIT_CLIENT_ID")
-        client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
-        if not client_id or not client_secret:
-            raise RuntimeError(
-                "REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET must be set. "
-                "Create a 'script' app at https://www.reddit.com/prefs/apps"
-            )
-        return Reddit(
-            client_id=client_id,
-            client_secret=client_secret,
-            user_agent=os.environ.get("REDDIT_USER_AGENT", "reddalert/1.0"),
+    def _create_http_client() -> httpx.Client:
+        """Create an httpx client for Reddit's public JSON endpoints."""
+        return httpx.Client(
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+            follow_redirects=True,
+            timeout=30.0,
         )
 
     # ------------------------------------------------------------------
@@ -63,9 +63,13 @@ class RedditPoller:
     ) -> list[RedditContent]:
         """Fetch new posts and top-level comments for a single subreddit.
 
+        Makes two requests per subreddit:
+          1. /r/{sub}/new.json      — recent posts
+          2. /r/{sub}/comments.json — recent top-level comments
+
         Args:
             subreddit_name: Name of the subreddit (without r/ prefix).
-            limit: Maximum number of posts to fetch per poll.
+            limit: Maximum number of items to fetch per endpoint.
 
         Returns:
             List of newly created RedditContent records.
@@ -76,33 +80,35 @@ class RedditPoller:
         for post in posts:
             raw_items.append(
                 {
-                    "reddit_id": post.id,
+                    "reddit_id": post["id"],
                     "subreddit": subreddit_name,
                     "content_type": ContentType.post,
-                    "title": post.title,
-                    "body": post.selftext or "",
-                    "author": str(post.author) if post.author else "[deleted]",
+                    "title": post.get("title", ""),
+                    "body": post.get("selftext", ""),
+                    "author": post.get("author") or "[deleted]",
                     "reddit_created_at": datetime.fromtimestamp(
-                        post.created_utc, tz=timezone.utc
+                        post["created_utc"], tz=timezone.utc
                     ),
                 }
             )
 
-            comments = self._fetch_comments(post)
-            for comment in comments:
-                raw_items.append(
-                    {
-                        "reddit_id": comment.id,
-                        "subreddit": subreddit_name,
-                        "content_type": ContentType.comment,
-                        "title": None,
-                        "body": comment.body or "",
-                        "author": str(comment.author) if comment.author else "[deleted]",
-                        "reddit_created_at": datetime.fromtimestamp(
-                            comment.created_utc, tz=timezone.utc
-                        ),
-                    }
-                )
+        time.sleep(REQUEST_DELAY)
+
+        comments = self._fetch_comments(subreddit_name, limit)
+        for comment in comments:
+            raw_items.append(
+                {
+                    "reddit_id": comment["id"],
+                    "subreddit": subreddit_name,
+                    "content_type": ContentType.comment,
+                    "title": None,
+                    "body": comment.get("body", ""),
+                    "author": comment.get("author") or "[deleted]",
+                    "reddit_created_at": datetime.fromtimestamp(
+                        comment["created_utc"], tz=timezone.utc
+                    ),
+                }
+            )
 
         return self._store_content(raw_items)
 
@@ -133,30 +139,49 @@ class RedditPoller:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _fetch_posts(self, subreddit_name: str, limit: int) -> list:
-        """Fetch recent posts from a subreddit via PRAW.
+    def _fetch_posts(self, subreddit_name: str, limit: int) -> list[dict]:
+        """Fetch recent posts from a subreddit via its public JSON feed.
 
         Args:
             subreddit_name: Subreddit name without the r/ prefix.
             limit: Max posts to retrieve.
 
         Returns:
-            List of PRAW Submission objects.
+            List of post data dicts from the Reddit JSON response.
         """
-        subreddit = self.reddit.subreddit(subreddit_name)
-        return list(subreddit.new(limit=limit))
+        url = f"{REDDIT_BASE_URL}/r/{subreddit_name}/new.json"
+        resp = self.http.get(url, params={"limit": limit, "raw_json": 1})
+        resp.raise_for_status()
+        data = resp.json()
+        return [child["data"] for child in data["data"]["children"]]
 
-    def _fetch_comments(self, submission) -> list:
-        """Fetch top-level comments from a submission.
+    def _fetch_comments(self, subreddit_name: str, limit: int = 100) -> list[dict]:
+        """Fetch recent top-level comments from a subreddit.
+
+        Uses /r/{sub}/comments.json which returns the latest comments across
+        the entire subreddit in a single request. Filters to top-level only
+        (parent_id starts with ``t3_``).
 
         Args:
-            submission: A PRAW Submission object.
+            subreddit_name: Subreddit name without the r/ prefix.
+            limit: Max comments to retrieve.
 
         Returns:
-            List of top-level PRAW Comment objects (MoreComments are skipped).
+            List of comment data dicts (top-level only).
         """
-        submission.comments.replace_more(limit=0)
-        return list(submission.comments)
+        url = f"{REDDIT_BASE_URL}/r/{subreddit_name}/comments.json"
+        resp = self.http.get(url, params={"limit": limit, "raw_json": 1})
+        resp.raise_for_status()
+        data = resp.json()
+
+        comments: list[dict] = []
+        for child in data["data"]["children"]:
+            if child["kind"] == "t1":
+                comment_data = child["data"]
+                # Top-level comments have a link (t3_) as their parent
+                if comment_data.get("parent_id", "").startswith("t3_"):
+                    comments.append(comment_data)
+        return comments
 
     def _store_content(self, raw_items: list[dict]) -> list[RedditContent]:
         """Normalize, deduplicate, and persist raw content items.

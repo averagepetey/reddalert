@@ -156,6 +156,7 @@ def get_auth_url(
     params = {
         "client_id": DISCORD_CLIENT_ID,
         "redirect_uri": DISCORD_REDIRECT_URI,
+        "response_type": "code",
         "scope": "bot",
         "permissions": str(BOT_PERMISSIONS),
         "state": state,
