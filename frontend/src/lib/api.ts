@@ -134,6 +134,7 @@ export function searchSubreddits(query: string) {
 export interface Webhook {
   id: string;
   url: string;
+  guild_name: string | null;
   is_primary: boolean;
   is_active: boolean;
   last_tested_at: string | null;

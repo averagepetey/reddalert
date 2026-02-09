@@ -10,6 +10,7 @@ class WebhookConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
     url = Column(String, nullable=False)
+    guild_name = Column(String, nullable=True)
     is_primary = Column(Boolean, default=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     last_tested_at = Column(DateTime(timezone=True), nullable=True)

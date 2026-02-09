@@ -184,18 +184,32 @@ def discord_callback(
         "Content-Type": "application/json",
     }
 
-    # Step 1: Create private #reddalert-alerts channel
+    # Step 1: Fetch guild name
+    guild_name = None
+    try:
+        with httpx.Client(timeout=10) as http_client:
+            guild_resp = http_client.get(
+                f"{DISCORD_API_BASE}/guilds/{payload.guild_id}",
+                headers=headers,
+            )
+            if guild_resp.status_code == 200:
+                guild_name = guild_resp.json().get("name")
+    except httpx.HTTPError:
+        pass  # Non-critical — proceed without the name
+
+    # Step 2: Create private #reddalert-alerts channel
     channel_data = _create_private_channel(payload.guild_id, headers)
     channel_id = channel_data["id"]
 
-    # Step 2: Create webhook in the new channel
+    # Step 3: Create webhook in the new channel
     webhook_data = _create_webhook(channel_id, headers)
     webhook_url = f"https://discord.com/api/webhooks/{webhook_data['id']}/{webhook_data['token']}"
 
-    # Step 3: Save webhook to DB
+    # Step 4: Save webhook to DB
     webhook = WebhookConfig(
         client_id=client.id,
         url=webhook_url,
+        guild_name=guild_name,
         is_primary=True,
     )
     db.add(webhook)

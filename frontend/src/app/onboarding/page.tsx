@@ -37,6 +37,7 @@ function OnboardingContent() {
   // Discord OAuth state
   const [discordConnected, setDiscordConnected] = useState(false);
   const [discordAvailable, setDiscordAvailable] = useState(true);
+  const [guildName, setGuildName] = useState<string | null>(null);
 
   // Step 2: Subreddits
   const [subredditName, setSubredditName] = useState("");
@@ -89,6 +90,7 @@ function OnboardingContent() {
           setWebhookId(primary.id);
           setWebhookTested(true);
           setDiscordConnected(true);
+          setGuildName(primary.guild_name);
           startStep = 1;
         }
 
@@ -130,6 +132,7 @@ function OnboardingContent() {
             setWebhookId(primary.id);
             setWebhookTested(true);
             setDiscordConnected(true);
+            setGuildName(primary.guild_name);
             setStep(1);
           }
         })
@@ -163,6 +166,7 @@ function OnboardingContent() {
                   setWebhookId(primary.id);
                   setWebhookTested(true);
                   setDiscordConnected(true);
+                  setGuildName(primary.guild_name);
                 }
               })
               .catch(() => {});
@@ -520,8 +524,10 @@ function OnboardingContent() {
               <h2 className="text-lg font-semibold">Confirm Setup</h2>
               <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 space-y-3">
                 <div>
-                  <p className="text-xs text-neutral-500">Webhook</p>
-                  <p className="text-sm text-white truncate">{webhookUrl}</p>
+                  <p className="text-xs text-neutral-500">Discord</p>
+                  <p className="text-sm text-white">
+                    {guildName ? guildName : webhookUrl}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-neutral-500">Subreddits</p>
