@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,17 +18,19 @@ from .api import (
     discord_router,
     keywords_router,
     matches_router,
+    poll_router,
     stats_router,
     subreddits_router,
     webhooks_router,
 )
-from .database import DATABASE_URL, engine
+from .database import DATABASE_URL, SessionLocal, engine
 from .models.base import Base
 
 # Import all models so Base.metadata knows about them
 from .models import clients, content, keywords, matches, subreddits, webhooks  # noqa: F401
 
 logger = logging.getLogger(__name__)
+scheduler = BackgroundScheduler()
 
 app = FastAPI(
     title="Reddalert",
@@ -64,6 +67,7 @@ app.include_router(keywords_router)
 app.include_router(subreddits_router)
 app.include_router(webhooks_router)
 app.include_router(matches_router)
+app.include_router(poll_router)
 app.include_router(stats_router)
 
 
@@ -84,11 +88,59 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
+def _run_poll_cycle():
+    """Background job: poll all active subreddits, match keywords, send alerts."""
+    from .models.subreddits import MonitoredSubreddit
+    from .services.alert_dispatcher import AlertDispatcher
+    from .services.match_engine import MatchEngine
+    from .services.poller import RedditPoller
+
+    db = SessionLocal()
+    try:
+        poller = RedditPoller(db)
+        engine_svc = MatchEngine(db)
+        dispatcher = AlertDispatcher(db)
+
+        active_names = (
+            db.query(MonitoredSubreddit.name)
+            .filter(MonitoredSubreddit.status == "active")
+            .distinct()
+            .all()
+        )
+
+        for (name,) in active_names:
+            try:
+                new_content = poller.poll_subreddit(name)
+                if new_content:
+                    engine_svc.process_batch(new_content)
+            except Exception:
+                logger.exception("Poll cycle: failed to poll r/%s", name)
+                db.rollback()
+
+        dispatcher.dispatch_pending()
+        logger.info("Poll cycle complete: checked %d subreddit(s)", len(active_names))
+    except Exception:
+        logger.exception("Poll cycle failed")
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup():
     if DATABASE_URL.startswith("sqlite"):
         Base.metadata.create_all(bind=engine)
         logger.info("SQLite mode: tables created automatically")
+
+    poll_minutes = int(os.getenv("POLL_INTERVAL_MINUTES", "5"))
+    scheduler.add_job(_run_poll_cycle, "interval", minutes=poll_minutes, id="poll_cycle")
+    scheduler.start()
+    logger.info("Scheduler started: polling every %d minute(s)", poll_minutes)
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    scheduler.shutdown(wait=False)
+    logger.info("Scheduler stopped")
 
 
 @app.get("/health")

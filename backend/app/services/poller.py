@@ -24,7 +24,7 @@ from .normalizer import normalize_text
 logger = logging.getLogger(__name__)
 
 REDDIT_BASE_URL = "https://www.reddit.com"
-DEFAULT_USER_AGENT = "reddalert/1.0"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; Reddalert/1.0)"
 # Small delay between the posts and comments requests to stay under rate limits.
 REQUEST_DELAY = 1.0
 
@@ -194,6 +194,7 @@ class RedditPoller:
             List of newly created RedditContent records.
         """
         new_records: list[RedditContent] = []
+        seen_hashes: set[str] = set()
 
         for item in raw_items:
             # Build the text to normalize: title + body for posts, body for comments
@@ -204,6 +205,11 @@ class RedditPoller:
 
             normalized = normalize_text(raw_text)
             content_hash = compute_content_hash(normalized.normalized_text)
+
+            # Skip duplicates within this batch
+            if content_hash in seen_hashes:
+                continue
+            seen_hashes.add(content_hash)
 
             if is_duplicate(self.db, content_hash):
                 continue

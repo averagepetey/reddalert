@@ -24,6 +24,7 @@ BATCH_THRESHOLD = 3
 BATCH_WINDOW_SECONDS = 120  # 2 minutes
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 1  # seconds
+MAX_FIELDS_PER_MESSAGE = 10  # Keep well under Discord's 6000-char total limit
 
 
 @dataclass
@@ -57,11 +58,14 @@ class AlertDispatcher:
 
         for batch in batches:
             if batch.is_batch:
-                payload = self._format_batch_embed(batch.matches)
+                payloads = self._format_batch_embeds(batch.matches)
             else:
-                payload = self._format_embed(batch.matches[0])
+                payloads = [self._format_embed(batch.matches[0])]
 
-            success = self._send_webhook(batch.webhook_url, payload)
+            # Send all payloads; if any fails, mark the whole batch failed
+            success = all(
+                self._send_webhook(batch.webhook_url, p) for p in payloads
+            )
 
             now = datetime.now(timezone.utc)
             for match in batch.matches:
@@ -194,28 +198,38 @@ class AlertDispatcher:
         return {"embeds": [embed]}
 
     @staticmethod
-    def _format_batch_embed(matches: list[Match]) -> dict:
-        """Create a batched Discord embed payload for multiple matches."""
-        first = matches[0]
+    def _format_batch_embeds(matches: list[Match]) -> list[dict]:
+        """Create Discord webhook payloads for multiple matches.
 
-        fields: list[dict] = []
+        Splits matches into chunks of MAX_FIELDS_PER_MESSAGE to stay
+        well under Discord's 6000-char-per-message limit.
+        Returns a list of payloads (one webhook call each).
+        """
+        all_fields: list[dict] = []
         for m in matches:
-            snippet = (m.snippet or "")[:100]
-            fields.append({
-                "name": f"{m.matched_phrase} in r/{m.subreddit}",
-                "value": f"{snippet}\n[View post]({m.reddit_url})",
+            snippet = (m.snippet or "")[:80]
+            all_fields.append({
+                "name": f"{m.matched_phrase} — r/{m.subreddit}",
+                "value": f"{snippet}\n[View]({m.reddit_url})",
                 "inline": False,
             })
 
-        embed: dict = {
-            "title": f"{len(matches)} New Keyword Matches",
-            "description": f"Batch alert — {len(matches)} matches detected recently.",
-            "color": 0xFF4500,
-            "fields": fields,
-            "footer": {"text": "Reddalert"},
-        }
+        payloads: list[dict] = []
+        for i in range(0, len(all_fields), MAX_FIELDS_PER_MESSAGE):
+            chunk = all_fields[i : i + MAX_FIELDS_PER_MESSAGE]
+            title = f"{len(matches)} New Keyword Matches"
+            if i > 0:
+                title += f" (part {i // MAX_FIELDS_PER_MESSAGE + 1})"
+            payloads.append({
+                "embeds": [{
+                    "title": title,
+                    "color": 0xFF4500,
+                    "fields": chunk,
+                    "footer": {"text": "Reddalert"},
+                }],
+            })
 
-        return {"embeds": [embed]}
+        return payloads
 
     # ------------------------------------------------------------------
     # Webhook delivery with retry

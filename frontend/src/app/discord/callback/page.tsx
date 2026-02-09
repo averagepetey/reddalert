@@ -10,6 +10,8 @@ function CallbackHandler() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     const guild_id = searchParams.get("guild_id");
     const permissions = searchParams.get("permissions");
     const state = searchParams.get("state");
@@ -27,6 +29,7 @@ function CallbackHandler() {
 
     sendDiscordGuild(guild_id, permissions || "", state)
       .then(() => {
+        if (cancelled) return;
         localStorage.removeItem("discord_oauth_state");
         localStorage.setItem("discord_oauth_result", "success");
         // If opened as popup, close it; otherwise redirect
@@ -37,6 +40,9 @@ function CallbackHandler() {
         }
       })
       .catch(() => {
+        if (cancelled) return;
+        // Don't overwrite a success from a prior call (React strict mode double-fire)
+        if (localStorage.getItem("discord_oauth_result") === "success") return;
         localStorage.setItem("discord_oauth_result", "error");
         if (window.opener) {
           window.close();
@@ -44,6 +50,8 @@ function CallbackHandler() {
           setError("Failed to connect Discord. Please try again.");
         }
       });
+
+    return () => { cancelled = true; };
   }, [searchParams, router]);
 
   if (error) {

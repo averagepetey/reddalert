@@ -228,6 +228,20 @@ export function getMatches(filters?: MatchFilters) {
   return apiFetch<PaginatedMatches>(`/matches${qs ? `?${qs}` : ""}`);
 }
 
+// --- Poll ---
+
+export interface PollResult {
+  subreddits_polled: number;
+  new_content: number;
+  matches_found: number;
+  alerts_sent: number;
+  alerts_failed: number;
+}
+
+export function pollNow() {
+  return apiFetch<PollResult>("/poll-now", { method: "POST" });
+}
+
 // --- Stats ---
 
 export interface KeywordStat {

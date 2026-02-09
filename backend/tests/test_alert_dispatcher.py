@@ -238,8 +238,10 @@ class TestEmbedFormat:
             _make_match(phrase="sports gambling"),
             _make_match(phrase="betting tools"),
         ]
-        payload = AlertDispatcher._format_batch_embed(matches)
+        payloads = AlertDispatcher._format_batch_embeds(matches)
 
+        assert len(payloads) >= 1
+        payload = payloads[0]
         assert "embeds" in payload
         embed = payload["embeds"][0]
         assert "3 New Keyword Matches" in embed["title"]

@@ -6,27 +6,65 @@ import AuthGuard from "@/components/AuthGuard";
 import StatCard from "@/components/StatCard";
 import MatchCard from "@/components/MatchCard";
 import EmptyState from "@/components/EmptyState";
-import { getStats, getMatches, type DashboardStats, type Match } from "@/lib/api";
+import { getStats, getMatches, pollNow, type DashboardStats, type Match, type PollResult } from "@/lib/api";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [error, setError] = useState("");
+  const [polling, setPolling] = useState(false);
+  const [pollResult, setPollResult] = useState<PollResult | null>(null);
 
-  useEffect(() => {
+  function loadDashboard() {
     getStats()
       .then(setStats)
       .catch(() => setError("Failed to load dashboard data."));
     getMatches({ per_page: 10, page: 1 })
       .then((data) => setRecentMatches(data.items))
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    loadDashboard();
   }, []);
+
+  async function handlePollNow() {
+    setPolling(true);
+    setPollResult(null);
+    setError("");
+    try {
+      const result = await pollNow();
+      setPollResult(result);
+      loadDashboard();
+    } catch {
+      setError("Poll failed. Check your connection and try again.");
+    } finally {
+      setPolling(false);
+    }
+  }
 
   return (
     <AuthGuard>
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <button
+          onClick={handlePollNow}
+          disabled={polling}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {polling ? "Polling..." : "Poll Now"}
+        </button>
+      </div>
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+
+      {pollResult && (
+        <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-3">
+          <p className="text-sm text-neutral-300">
+            Polled {pollResult.subreddits_polled} subreddit(s) — {pollResult.new_content} new items, {pollResult.matches_found} match(es), {pollResult.alerts_sent} alert(s) sent
+          </p>
+        </div>
+      )}
 
       {stats && (
         <>
