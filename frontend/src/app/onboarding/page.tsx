@@ -215,24 +215,47 @@ function OnboardingContent() {
     setSubredditName("");
   }
 
-  async function handleFinish() {
+  async function handleSaveSubreddits() {
+    if (subreddits.length === 0) {
+      setStep(2);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      // Add only new subreddits (skip already-saved ones)
       for (const name of subreddits) {
         await addSubreddit({ name });
       }
-      // Add keyword only if new phrases were entered
-      if (phrases.length > 0) {
-        await createKeyword({
-          phrases,
-          exclusions: exclusions.length > 0 ? exclusions : undefined,
-        });
-      }
-      router.push("/dashboard");
+      // Move saved names into "existing" and clear unsaved list
+      setExistingSubreddits([...existingSubreddits, ...subreddits]);
+      setSubreddits([]);
+      setStep(2);
     } catch {
-      setError("Setup failed. Some items may have been partially saved.");
+      setError("Failed to save subreddits. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSaveKeywords() {
+    if (phrases.length === 0) {
+      setStep(3);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      await createKeyword({
+        phrases,
+        exclusions: exclusions.length > 0 ? exclusions : undefined,
+      });
+      // Move saved phrases into "existing" and clear unsaved list
+      setExistingKeywords([...existingKeywords, ...phrases]);
+      setPhrases([]);
+      setExclusions([]);
+      setStep(3);
+    } catch {
+      setError("Failed to save keywords. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -450,11 +473,11 @@ function OnboardingContent() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep(2)}
-                  disabled={subreddits.length === 0 && existingSubreddits.length === 0}
+                  onClick={handleSaveSubreddits}
+                  disabled={loading || (subreddits.length === 0 && existingSubreddits.length === 0)}
                   className="rounded-lg bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Next
+                  {loading ? "Saving..." : "Next"}
                 </button>
               </div>
             </div>
@@ -508,11 +531,11 @@ function OnboardingContent() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep(3)}
-                  disabled={phrases.length === 0 && existingKeywords.length === 0}
+                  onClick={handleSaveKeywords}
+                  disabled={loading || (phrases.length === 0 && existingKeywords.length === 0)}
                   className="rounded-lg bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Next
+                  {loading ? "Saving..." : "Next"}
                 </button>
               </div>
             </div>
@@ -548,38 +571,20 @@ function OnboardingContent() {
                 </div>
               </div>
 
-              {subreddits.length === 0 && phrases.length === 0 ? (
-                <div className="flex gap-3 pt-4">
-                  <button
-                    onClick={() => setStep(2)}
-                    className="rounded-lg bg-neutral-800 px-6 py-2 text-sm text-white hover:bg-neutral-700"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={() => router.push("/dashboard")}
-                    className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700"
-                  >
-                    Go to Dashboard
-                  </button>
-                </div>
-              ) : (
-                <div className="flex gap-3 pt-4">
-                  <button
-                    onClick={() => setStep(2)}
-                    className="rounded-lg bg-neutral-800 px-6 py-2 text-sm text-white hover:bg-neutral-700"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={handleFinish}
-                    disabled={loading}
-                    className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
-                  >
-                    {loading ? "Setting up..." : "Start Monitoring"}
-                  </button>
-                </div>
-              )}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => setStep(2)}
+                  className="rounded-lg bg-neutral-800 px-6 py-2 text-sm text-white hover:bg-neutral-700"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={() => router.push("/dashboard")}
+                  className="rounded-lg bg-green-600 px-6 py-2 text-sm text-white hover:bg-green-700"
+                >
+                  Go to Dashboard
+                </button>
+              </div>
             </div>
           )}
         </div>
