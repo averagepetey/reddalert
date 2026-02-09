@@ -22,7 +22,7 @@ async def search_subreddits(q: str = Query(min_length=2)):
         resp = await client.get(
             "https://www.reddit.com/subreddits/search.json",
             params={"q": q, "limit": 8, "raw_json": 1},
-            headers={"User-Agent": "Reddalert/0.1"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; Reddalert/0.1)", "Accept": "application/json"},
         )
         if resp.status_code != 200:
             return []
