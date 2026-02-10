@@ -35,6 +35,9 @@ Thumbs.db
 # Docker
 pgdata/
 
+# Database
+*.db
+
 # Testing
 .coverage
 htmlcov/
