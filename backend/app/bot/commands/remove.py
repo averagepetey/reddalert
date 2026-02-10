@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 
 from ...database import SessionLocal
-from ...models.keywords import Keyword
+from ...models.keywords import Keyword, SilencedPhrase
 from ..checks import in_alert_channel
 from ..utils import get_client_for_guild, parse_duration
 
@@ -40,8 +40,14 @@ def _restore_phrase(keyword_id: str, phrase: str) -> None:
             if phrase.lower() not in [p.lower() for p in current]:
                 current.append(phrase)
                 keyword.phrases = current
-                db.commit()
                 logger.info("Restored phrase '%s' to keyword %s", phrase, keyword_id)
+
+        # Delete the SilencedPhrase record
+        db.query(SilencedPhrase).filter(
+            SilencedPhrase.keyword_id == keyword_id,
+            SilencedPhrase.phrase == phrase,
+        ).delete()
+        db.commit()
     except Exception:
         logger.exception("Failed to restore phrase '%s' to keyword %s", phrase, keyword_id)
         db.rollback()
@@ -121,10 +127,14 @@ async def remove_command(
                 matched_kw.is_active = False
                 matched_kw.silenced_until = reactivate_at
             else:
-                # Remove just this phrase; store it so we can restore it later
+                # Remove just this phrase; persist so restore survives restarts
                 matched_kw.phrases = remaining_phrases
-                if not matched_kw.exclusions:
-                    matched_kw.exclusions = []
+                silenced = SilencedPhrase(
+                    keyword_id=matched_kw.id,
+                    phrase=keyword.strip(),
+                    restore_at=reactivate_at,
+                )
+                db.add(silenced)
 
             db.commit()
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.bot.utils import get_client_for_guild, parse_duration
 from app.models.base import Base
 from app.models.clients import Client
-from app.models.keywords import Keyword
+from app.models.keywords import Keyword, SilencedPhrase
 from app.models.subreddits import MonitoredSubreddit
 from app.models.webhooks import WebhookConfig
 
@@ -394,3 +394,124 @@ class TestReactivation:
         db.refresh(active_keyword)
         assert active_keyword.is_active is True
         assert active_keyword.silenced_until is None
+
+
+# ---------------------------------------------------------------------------
+# SilencedPhrase persistence tests
+# ---------------------------------------------------------------------------
+
+class TestSilencedPhrasePersistence:
+    def test_silenced_phrase_created_on_temp_remove(self, db, client, active_keyword):
+        """Removing a phrase with duration creates a SilencedPhrase record."""
+        restore_at = datetime.now(timezone.utc) + timedelta(minutes=20)
+        # Simulate what /remove does for a multi-phrase keyword with duration
+        remaining = [p for p in active_keyword.phrases if p.lower() != "arb"]
+        active_keyword.phrases = remaining
+        sp = SilencedPhrase(
+            keyword_id=active_keyword.id,
+            phrase="arb",
+            restore_at=restore_at,
+        )
+        db.add(sp)
+        db.commit()
+
+        records = db.query(SilencedPhrase).filter(
+            SilencedPhrase.keyword_id == active_keyword.id
+        ).all()
+        assert len(records) == 1
+        assert records[0].phrase == "arb"
+        assert "arb" not in active_keyword.phrases
+        assert "arbitrage" in active_keyword.phrases
+
+    def test_restore_phrase_adds_back_and_deletes_record(self, db, client, active_keyword):
+        """Restoring a phrase adds it back to the array and removes the record."""
+        # Remove phrase and create record
+        active_keyword.phrases = ["arbitrage"]
+        sp = SilencedPhrase(
+            keyword_id=active_keyword.id,
+            phrase="arb",
+            restore_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+        db.add(sp)
+        db.commit()
+
+        # Simulate _restore_phrase logic
+        kw = db.query(Keyword).filter(Keyword.id == active_keyword.id).first()
+        current = list(kw.phrases or [])
+        if "arb" not in [p.lower() for p in current]:
+            current.append("arb")
+            kw.phrases = current
+        db.query(SilencedPhrase).filter(
+            SilencedPhrase.keyword_id == active_keyword.id,
+            SilencedPhrase.phrase == "arb",
+        ).delete()
+        db.commit()
+
+        db.refresh(active_keyword)
+        assert "arb" in active_keyword.phrases
+        assert "arbitrage" in active_keyword.phrases
+        remaining = db.query(SilencedPhrase).filter(
+            SilencedPhrase.keyword_id == active_keyword.id
+        ).all()
+        assert len(remaining) == 0
+
+    def test_expired_phrase_restored_on_startup(self, db, client, active_keyword):
+        """On startup, expired SilencedPhrase records are restored immediately."""
+        active_keyword.phrases = ["arbitrage"]
+        sp = SilencedPhrase(
+            keyword_id=active_keyword.id,
+            phrase="arb",
+            restore_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        )
+        db.add(sp)
+        db.commit()
+
+        # Simulate startup logic
+        pending = db.query(SilencedPhrase).all()
+        now = datetime.utcnow()
+        for record in pending:
+            restore_at = record.restore_at
+            if restore_at.tzinfo:
+                restore_at = restore_at.replace(tzinfo=None)
+            if restore_at <= now:
+                kw = db.query(Keyword).filter(Keyword.id == record.keyword_id).first()
+                if kw:
+                    current = list(kw.phrases or [])
+                    if record.phrase.lower() not in [p.lower() for p in current]:
+                        current.append(record.phrase)
+                        kw.phrases = current
+                db.delete(record)
+        db.commit()
+
+        db.refresh(active_keyword)
+        assert "arb" in active_keyword.phrases
+        assert "arbitrage" in active_keyword.phrases
+        remaining = db.query(SilencedPhrase).all()
+        assert len(remaining) == 0
+
+    def test_future_phrase_not_restored_on_startup(self, db, client, active_keyword):
+        """On startup, future SilencedPhrase records are left for rescheduling."""
+        active_keyword.phrases = ["arbitrage"]
+        sp = SilencedPhrase(
+            keyword_id=active_keyword.id,
+            phrase="arb",
+            restore_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db.add(sp)
+        db.commit()
+
+        # Simulate startup logic — only restore expired ones
+        pending = db.query(SilencedPhrase).all()
+        now = datetime.utcnow()
+        for record in pending:
+            restore_at = record.restore_at
+            if restore_at.tzinfo:
+                restore_at = restore_at.replace(tzinfo=None)
+            if restore_at <= now:
+                db.delete(record)
+        db.commit()
+
+        db.refresh(active_keyword)
+        assert "arb" not in active_keyword.phrases
+        remaining = db.query(SilencedPhrase).all()
+        assert len(remaining) == 1

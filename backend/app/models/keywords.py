@@ -27,3 +27,19 @@ class Keyword(UUIDPrimaryKeyMixin, Base):
 
     client = relationship("Client", back_populates="keywords")
     matches = relationship("Match", back_populates="keyword", cascade="all, delete-orphan")
+    silenced_phrases = relationship("SilencedPhrase", back_populates="keyword", cascade="all, delete-orphan")
+
+
+class SilencedPhrase(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "silenced_phrases"
+
+    keyword_id = Column(UUID(as_uuid=True), ForeignKey("keywords.id"), nullable=False)
+    phrase = Column(String, nullable=False)
+    restore_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    keyword = relationship("Keyword", back_populates="silenced_phrases")

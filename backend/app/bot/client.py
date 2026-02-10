@@ -5,11 +5,11 @@ import discord
 from discord.ext import commands
 
 from ..database import SessionLocal
-from ..models.keywords import Keyword
+from ..models.keywords import Keyword, SilencedPhrase
 from ..models.webhooks import WebhookConfig
 from .commands.add import add_group
 from .commands.help import help_command
-from .commands.remove import _reactivate_keyword, remove_command
+from .commands.remove import _reactivate_keyword, _restore_phrase, remove_command
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,9 @@ async def on_ready() -> None:
     # Backfill existing webhooks missing guild_id/channel_id
     await _backfill_webhooks()
 
-    # Re-schedule pending keyword reactivations
+    # Re-schedule pending keyword reactivations and phrase restores
     _reschedule_pending_reactivations()
+    _reschedule_pending_phrase_restores()
 
     # Sync command tree
     try:
@@ -117,6 +118,48 @@ def _reschedule_pending_reactivations() -> None:
                     "Re-scheduled reactivation for keyword %s at %s",
                     kw.id,
                     kw.silenced_until,
+                )
+    finally:
+        db.close()
+
+
+def _reschedule_pending_phrase_restores() -> None:
+    """Re-schedule restore jobs for temporarily removed phrases."""
+    from ..main import scheduler
+
+    db = SessionLocal()
+    try:
+        pending = db.query(SilencedPhrase).all()
+        now = datetime.now(timezone.utc)
+        for sp in pending:
+            restore_at = sp.restore_at
+            # SQLite may strip tzinfo
+            if restore_at.tzinfo is None:
+                restore_at = restore_at.replace(tzinfo=timezone.utc)
+
+            if restore_at <= now:
+                # Already expired — restore immediately
+                _restore_phrase(str(sp.keyword_id), sp.phrase)
+                logger.info(
+                    "Restored expired phrase '%s' for keyword %s on startup",
+                    sp.phrase,
+                    sp.keyword_id,
+                )
+            else:
+                job_id = f"reactivate_{sp.keyword_id}_{sp.phrase.lower()}"
+                scheduler.add_job(
+                    _restore_phrase,
+                    "date",
+                    run_date=restore_at,
+                    args=[str(sp.keyword_id), sp.phrase],
+                    id=job_id,
+                    replace_existing=True,
+                )
+                logger.info(
+                    "Re-scheduled phrase restore '%s' for keyword %s at %s",
+                    sp.phrase,
+                    sp.keyword_id,
+                    restore_at,
                 )
     finally:
         db.close()
