@@ -304,6 +304,8 @@ class WebhookResponse(BaseModel):
     client_id: uuid.UUID
     url: str
     guild_name: Optional[str] = None
+    guild_id: Optional[str] = None
+    channel_id: Optional[str] = None
     is_primary: bool
     is_active: bool
     last_tested_at: Optional[datetime]

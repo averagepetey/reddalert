@@ -11,3 +11,4 @@ apscheduler==3.11.0
 passlib==1.7.4
 PyJWT>=2.8.0
 python-multipart==0.0.20
+discord.py>=2.3.0

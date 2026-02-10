@@ -157,7 +157,7 @@ def get_auth_url(
         "client_id": DISCORD_CLIENT_ID,
         "redirect_uri": DISCORD_REDIRECT_URI,
         "response_type": "code",
-        "scope": "bot",
+        "scope": "bot applications.commands",
         "permissions": str(BOT_PERMISSIONS),
         "state": state,
     }
@@ -210,6 +210,8 @@ def discord_callback(
         client_id=client.id,
         url=webhook_url,
         guild_name=guild_name,
+        guild_id=payload.guild_id,
+        channel_id=channel_id,
         is_primary=True,
     )
     db.add(webhook)

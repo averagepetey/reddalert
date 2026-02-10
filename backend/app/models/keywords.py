@@ -18,6 +18,7 @@ class Keyword(UUIDPrimaryKeyMixin, Base):
     require_order = Column(Boolean, default=False, nullable=False)
     use_stemming = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    silenced_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

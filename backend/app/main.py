@@ -126,7 +126,7 @@ def _run_poll_cycle():
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     if DATABASE_URL.startswith("sqlite"):
         Base.metadata.create_all(bind=engine)
         logger.info("SQLite mode: tables created automatically")
@@ -136,11 +136,31 @@ def on_startup():
     scheduler.start()
     logger.info("Scheduler started: polling every %d minute(s)", poll_minutes)
 
+    # Start Discord bot if token is configured
+    import asyncio
+
+    discord_bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
+    if discord_bot_token:
+        from .bot.client import bot
+
+        asyncio.create_task(bot.start(discord_bot_token))
+        logger.info("Discord bot starting...")
+    else:
+        logger.warning("DISCORD_BOT_TOKEN not set — Discord bot will not start")
+
 
 @app.on_event("shutdown")
-def on_shutdown():
+async def on_shutdown():
     scheduler.shutdown(wait=False)
     logger.info("Scheduler stopped")
+
+    discord_bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
+    if discord_bot_token:
+        from .bot.client import bot
+
+        if not bot.is_closed():
+            await bot.close()
+            logger.info("Discord bot stopped")
 
 
 @app.get("/health")
